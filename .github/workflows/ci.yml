@@ -66,31 +66,13 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: 写入 .env 文件到服务器
-        run: |
-          cat > /tmp/tianyi-env << 'ENVEOF'
-          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_API_BASE=https://api.deepseek.com
-          DEEPSEEK_MODEL=deepseek-v4-flash
-          TEMPERATURE=0.7
-          MAX_TOKENS=2048
-          VERBOSE=false
-          SECRET_KEY=${{ secrets.SECRET_KEY }}
-          DB_HOST=db
-          DB_USER=postgres
-          DB_PASSWORD=postgres
-          DB_PORT=5432
-          DB_NAME=langchain_db
-          CORS_ORIGINS=https://xiaoyuetech.online
-          CSRF_ENABLED=1
-          TENCENT_COS_SECRET_ID=${{ secrets.TENCENT_COS_SECRET_ID }}
-          TENCENT_COS_SECRET_KEY=${{ secrets.TENCENT_COS_SECRET_KEY }}
-          TENCENT_COS_REGION=ap-shanghai
-          TENCENT_COS_BUCKET=tianyi-1387165427
-          WECHAT_WEBHOOK_URL=${{ secrets.WECHAT_WEBHOOK_URL }}
-          ENVEOF
-          scp -o StrictHostKeyChecking=no /tmp/tianyi-env ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/ubuntu/tianyi_agent_langchain/.env
-
       - name: 通过 SSH 执行部署脚本
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "bash /home/ubuntu/tianyi_agent_langchain/deploy.sh"
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            export DEEPSEEK_API_KEY='${{ secrets.DEEPSEEK_API_KEY }}'
+            export SECRET_KEY='${{ secrets.SECRET_KEY }}'
+            export TENCENT_COS_SECRET_ID='${{ secrets.TENCENT_COS_SECRET_ID }}'
+            export TENCENT_COS_SECRET_KEY='${{ secrets.TENCENT_COS_SECRET_KEY }}'
+            export WECHAT_WEBHOOK_URL='${{ secrets.WECHAT_WEBHOOK_URL }}'
+            bash /home/ubuntu/tianyi_agent_langchain/deploy.sh
+          "
