@@ -66,7 +66,7 @@ def run_text_processor():
     ]
 
     text = "LangChain 是一个强大的框架，它简化了 LLM 应用的开发流程。"
-    print(f"\n=== 文本处理管道 ===")
+    print("\n=== 文本处理管道 ===")
     print(f"[输入]: {text}")
 
     for name, prompt in steps:

@@ -12,6 +12,41 @@ from app.examples.translator import run_translator, run_text_processor
 import os
 
 
+def run_example(name, func):
+    """运行单个示例并捕获异常"""
+    print(f"\n{'='*50}")
+    print(f"  运行: {name}")
+    print(f"{'='*50}")
+    try:
+        func()
+    except Exception as e:
+        print(f"  ❌ 运行失败: {e}")
+
+
+def run_all_examples(examples):
+    """运行所有示例"""
+    for _, name, func in examples:
+        if func:
+            run_example(name, func)
+
+
+def run_selected_example(examples, choice):
+    """运行指定编号的示例"""
+    for key, name, func in examples:
+        if key == choice and func:
+            run_example(name, func)
+            return True
+    return False
+
+
+def print_menu(examples):
+    """打印菜单"""
+    print("\n请选择要运行的示例:")
+    for key, name, _ in examples:
+        print(f"  [{key}] {name}")
+    print("  [q] 退出")
+
+
 def main():
     print("=" * 60)
     print("   LangChain 全套工程示例")
@@ -38,39 +73,15 @@ def main():
         ("0", "运行所有示例", None),
     ]
 
-    print("\n请选择要运行的示例:")
-    for key, name, _ in examples:
-        print(f"  [{key}] {name}")
-    print("  [q] 退出")
-
+    print_menu(examples)
     choice = input("\n请输入编号: ").strip()
 
     if choice == "q":
         print("再见！")
-        return
     elif choice == "0":
-        for _, name, func in examples:
-            if func:
-                print(f"\n{'='*50}")
-                print(f"  运行: {name}")
-                print(f"{'='*50}")
-                try:
-                    func()
-                except Exception as e:
-                    print(f"  ❌ 运行失败: {e}")
-    else:
-        for key, name, func in examples:
-            if key == choice and func:
-                print(f"\n{'='*50}")
-                print(f"  运行: {name}")
-                print(f"{'='*50}")
-                try:
-                    func()
-                except Exception as e:
-                    print(f"  ❌ 运行失败: {e}")
-                break
-        else:
-            print("无效选择")
+        run_all_examples(examples)
+    elif not run_selected_example(examples, choice):
+        print("无效选择")
 
 
 if __name__ == "__main__":
