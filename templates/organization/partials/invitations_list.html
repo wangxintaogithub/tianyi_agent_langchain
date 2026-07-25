@@ -1,0 +1,48 @@
+
+{# Partial: <li> items for pending invitations. Swapped into <ul id="invitations-list">. #}
+{# Set show_invitation_cancel=true via {% with %} to render Resend/Cancel controls (members card only). #}
+{% for inv in pending_invitations %}
+<li class="list-group-item invitation-list-item">
+    <div class="invitation-list-item-body">
+        <div class="invitation-list-leading me-md-auto">
+            <span class="invitation-list-email">{{ inv.invitee_email }}</span>
+            <span class="invitation-list-role-text">(Role: {{ inv.role.name }})</span>
+            {% if inv.is_expired() %}
+            <span class="badge bg-warning text-dark">Expired</span>
+            {% else %}
+            <span class="badge bg-success">Active</span>
+            {% endif %}
+        </div>
+        <small class="text-muted invitation-list-expiry">Expires: {{ inv.expires_at.strftime('%Y-%m-%d') }}</small>
+        {% if show_invitation_cancel is defined and show_invitation_cancel and ValidPermissions is defined and user_permissions is defined and ValidPermissions.INVITE_USER in user_permissions %}
+        <div class="invitation-actions-cell">
+            <form method="POST" action="{{ url_for('resend_invitation') }}" class="invitation-resend-form mb-0"
+                  hx-post="{{ url_for('resend_invitation') }}"
+                  hx-target="#members-card-content"
+                  hx-swap="innerHTML">
+                  {% include 'base/partials/csrf_field.html' %}
+                <input type="hidden" name="invitation_id" value="{{ inv.id }}">
+                <input type="hidden" name="organization_id" value="{{ organization.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary btn-invitation-resend">
+                    Resend
+                </button>
+            </form>
+            <form method="POST" action="{{ url_for('delete_invitation') }}" class="invitation-cancel-form mb-0"
+                  hx-post="{{ url_for('delete_invitation') }}"
+                  hx-target="#members-card-content"
+                  hx-swap="innerHTML"
+                  hx-confirm="Cancel invitation for {{ inv.invitee_email }}?">
+                  {% include 'base/partials/csrf_field.html' %}
+                <input type="hidden" name="invitation_id" value="{{ inv.id }}">
+                <input type="hidden" name="organization_id" value="{{ organization.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    Cancel
+                </button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</li>
+{% else %}
+<li class="list-group-item text-muted">No pending invitations.</li>
+{% endfor %}

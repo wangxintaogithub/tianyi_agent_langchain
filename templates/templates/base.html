@@ -1,0 +1,70 @@
+<!-- base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Home{% endblock %} | FastAPI-Jinja2-Postgres Webapp</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+    <link href="{{ url_for('static', path='css/styles.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', path='css/extras.css') }}" rel="stylesheet">
+
+    <link rel="apple-touch-icon" sizes="152x152" href="{{ url_for('static', path='apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='favicon-16x16.png') }}">
+    <link rel="manifest" href="{{ url_for('static', path='site.webmanifest') }}">
+    <link rel="mask-icon" href="{{ url_for('static', path='safari-pinned-tab.svg') }}" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="csrf-token" content="{{ request.state.csrf_token }}">
+    <!-- Scripts in <head> with defer so they are NOT re-processed during
+         htmx hx-boost body swaps. This keeps our component JS (ui.js) and its
+         document-level event delegation working across AJAX navigations. defer
+         maintains execution order and waits for DOM parsing to complete. -->
+    <script defer src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/htmx-ext-remove-me@2.0.0/remove-me.js"></script>
+    <script defer src="{{ url_for('static', path='js/ui.js') }}"></script>
+    <script defer src="{{ url_for('static', path='js/app.js') }}"></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="min-vh-100 d-flex flex-column">
+    <div id="toast-container"
+         class="toast-container position-fixed bottom-0 end-0 p-3"
+         hx-ext="remove-me"
+         aria-live="polite">
+      {% set flash = request.state.flash %}
+      {% if flash %}
+      <div class="toast align-items-center text-bg-{{ flash.level|default('success') }} border-0 show"
+           role="alert" aria-atomic="true" remove-me="5s">
+        <div class="d-flex">
+          <div class="toast-body">{{ flash.message }}</div>
+          <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                  data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <header>
+        <!-- Common header content -->
+        {% include 'base/partials/header.html' %}
+    </header>
+
+    <main class="flex-grow-1">
+        {% block content %}
+        <!-- Page-specific content goes here -->
+        {% endblock %}
+    </main>
+
+    <footer>
+        <!-- Common footer content -->
+        {% include 'base/partials/footer.html' %}
+    </footer>
+
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

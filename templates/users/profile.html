@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% from 'users/macros/organizations.html' import render_organizations with context %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <h1 class="mb-4">User Profile</h1>
+
+    <!-- Profile (display or edit, server-driven via HTMX) -->
+    <div class="card mb-4" id="profile-card">
+        {% include 'users/partials/profile_display.html' %}
+    </div>
+
+    <!-- Communication Preferences -->
+    <div class="card mb-4" id="communication-preferences-card">
+        <div class="card-header">
+            Communication Preferences
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('update_communication_preferences') }}" method="post"
+                  hx-post="{{ url_for('update_communication_preferences') }}" hx-swap="none">
+                  {% include 'base/partials/csrf_field.html' %}
+                {% include 'partials/communication_preferences_fields.html' with context %}
+                <button type="submit" class="btn btn-primary mt-3">Save Preferences</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Email Addresses -->
+    <div class="card mb-4">
+        <div class="card-header">
+            Email Addresses
+        </div>
+        <div class="card-body">
+            {% if account_emails %}
+            <ul class="list-group mb-3 profile-email-list">
+                {% for email in account_emails %}
+                <li class="list-group-item profile-email-list-item">
+                    <div class="profile-email-list-item-body">
+                        <div class="profile-email-leading">
+                            <span class="profile-email-address">{{ email.email }}</span>
+                            {% if email.is_primary %}
+                                <span class="badge bg-primary">Primary</span>
+                            {% elif not email.verified %}
+                                <span class="badge bg-warning">Pending verification</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Secondary</span>
+                            {% endif %}
+                        </div>
+                        <div class="profile-email-actions">
+                            {% if not email.is_primary and email.verified %}
+                            <form action="{{ url_for('promote_email') }}" method="post" class="profile-email-action-form mb-0"
+                                  hx-post="{{ url_for('promote_email') }}" hx-swap="none">
+                                  {% include 'base/partials/csrf_field.html' %}
+                                <input type="hidden" name="email_id" value="{{ email.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">Make Primary</button>
+                            </form>
+                            {% endif %}
+                            {% if not email.is_primary %}
+                            <form action="{{ url_for('remove_email') }}" method="post" class="profile-email-action-form mb-0"
+                                  hx-post="{{ url_for('remove_email') }}" hx-swap="none">
+                                  {% include 'base/partials/csrf_field.html' %}
+                                <input type="hidden" name="email_id" value="{{ email.id }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+
+            {% if account_emails|length < max_emails %}
+            <form action="{{ url_for('add_email') }}" method="post" class="profile-add-email-form"
+                  hx-post="{{ url_for('add_email') }}" hx-swap="none"
+                  hx-on::after-settle="this.reset()">
+                  {% include 'base/partials/csrf_field.html' %}
+                <div class="input-group">
+                    <input type="email" class="form-control" name="new_email" placeholder="Add Email Address" required>
+                    <button type="submit" class="btn btn-primary">Add Email</button>
+                </div>
+                <p class="form-text mt-1">A verification link will be sent to the new email address.</p>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Change Password -->
+    <div class="card mb-4">
+        <div class="card-header">
+            Change Password
+        </div>
+        <div class="card-body">
+            {% if show_form %}
+            <form action="{{ url_for('forgot_password') }}" method="post">
+                {% include 'base/partials/csrf_field.html' %}
+                <input type="hidden" name="email" value="{{ user.account.email }}">
+                <p>To change your password, please confirm your email. A password reset link will be sent to your email address.</p>
+                <button type="submit" class="btn btn-primary">Send Password Reset Email</button>
+            </form>
+            {% else %}
+            <p>A password reset link has been sent to your email address. Note that you can request a password reset only once an hour. If you have not received an email, please check your spam folder or try again later.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Organizations Section -->
+    {{ render_organizations(user.roles|map(attribute='organization')|list) }}
+
+    <!-- Delete Account -->
+    <div class="card mb-4">
+        <div class="card-header">
+            Delete Account
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('delete_account') }}" method="post">
+                {% include 'base/partials/csrf_field.html' %}
+                <p class="text-danger">This action cannot be undone. Please confirm your email and password to delete your account.</p>
+                <div class="mb-3">
+                    <label for="delete_email" class="form-label">Email</label>
+                    <input type="email" class="form-control" id="delete_email" name="email" autocomplete="off">
+                </div>
+                <div class="mb-3">
+                    <label for="delete_password" class="form-label">Password</label>
+                    <input type="password" class="form-control" id="delete_password" name="password" autocomplete="off">
+                </div>
+                <button type="submit" class="btn btn-danger">Delete Account</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -27,8 +27,7 @@ services:
     environment:
       - ACME_EMAIL=super_shaun@163.com
     depends_on:
-      - backend
-      - frontend
+      - app
     networks:
       - langchain-net
 
@@ -37,48 +36,64 @@ services:
   # ========================
   db:
     ports:
-      - "127.0.0.1:5432:5432"   # 仅本地可连，外网通过 Traefik
+      - "127.0.0.1:5432:5432"   # 仅本地可连
+    networks:
+      - langchain-net
 
   # ========================
-  # 后端 - 通过 Traefik 反代，不暴露端口
+  # 应用服务（API + 前端页面 + 管理后台）
+  # 一体式 FastAPI 容器，同时提供：
+  #   - /api/*         → LangChain API（外部调用）
+  #   - /account/*     → 登录/注册页面
+  #   - /dashboard     → 管理后台仪表盘
+  #   - /admin/*       → 管理功能
+  #   - /*             → 首页及其他页面
   # ========================
-  backend:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tianyi-app
+    restart: unless-stopped
     expose:
       - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/langchain_db
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:?请设置 DEEPSEEK_API_KEY}
+      - DEEPSEEK_API_BASE=${DEEPSEEK_API_BASE:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-v4-flash}
+      - TEMPERATURE=${TEMPERATURE:-0.7}
+      - MAX_TOKENS=${MAX_TOKENS:-2048}
       - VERBOSE=false
+      - SECRET_KEY=${SECRET_KEY:?请设置 SECRET_KEY}
+      - BASE_URL=https://xiaoyuetech.online
+      - DB_HOST=db
+      - DB_USER=postgres
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_PORT=5432
+      - DB_NAME=langchain_db
+      - CSRF_ENABLED=1
       - CORS_ORIGINS=https://xiaoyuetech.online
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=langchain-net"
 
-      # 路由：/api/* 和 /health → backend
-      - "traefik.http.routers.backend.rule=Host(`xiaoyuetech.online`) && (PathPrefix(`/api`) || Path(`/health`))"
-      - "traefik.http.routers.backend.entrypoints=websecure"
-      - "traefik.http.routers.backend.tls=true"
-      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.backend.loadbalancer.server.port=8000"
-
-  # ========================
-  # 前端 - 通过 Traefik 反代，不暴露端口
-  # ========================
-  frontend:
-    expose:
-      - "80"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=langchain-net"
-
-      # 路由：其他所有路径 → frontend
-      - "traefik.http.routers.frontend.rule=Host(`xiaoyuetech.online`)"
-      - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls=true"
-      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+      # 所有流量 → app 服务
+      - "traefik.http.routers.app.rule=Host(`xiaoyuetech.online`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=8000"
 
       # 中间件：转发真实客户端 IP
-      - "traefik.http.middlewares.frontend-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+      - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+    networks:
+      - langchain-net
 
 volumes:
   traefik_data:
+
+networks:
+  langchain-net:

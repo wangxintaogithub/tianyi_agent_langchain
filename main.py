@@ -1,86 +1,416 @@
-"""
-主入口 - 运行所有示例（兼容旧路径）
+import logging
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request, Depends, status
+from fastapi.responses import RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from routers.core import (
+    account,
+    dashboard,
+    organization,
+    role,
+    user,
+    static_pages,
+    invitation,
+)
+from routers.app import langchain as langchain_router
+from routers.app import agent as agent_router
+from routers.app import rag as rag_router
+from routers.app import upload as upload_router
+from utils.core.dependencies import (
+    get_user_from_request,
+    require_unauthenticated_client,
+)
+from utils.core.auth import refresh_token_is_persistent, set_auth_cookies
+from utils.core.rate_limit import get_trusted_proxy_hosts
+from utils.core.csrf import (
+    CSRF_COOKIE_NAME,
+    UNSAFE_HTTP_METHODS,
+    csrf_enabled,
+    extract_submitted_csrf_token,
+    generate_csrf_token,
+    set_csrf_cookie,
+    validate_csrf_token,
+)
+from utils.core.htmx import (
+    is_htmx_request,
+    toast_response,
+    get_flash_cookie,
+    FLASH_COOKIE_NAME,
+)
+from exceptions.http_exceptions import (
+    AlreadyAuthenticatedError,
+    AuthenticationError,
+    CsrfError,
+    PasswordValidationError,
+    CredentialsError,
+    RateLimitError,
+)
+from exceptions.exceptions import NeedsNewTokens
+from utils.core.db import set_up_db
 
-运行方式：
-  python main.py                  # 从项目根目录运行
-  python -m backend.app.cli       # 从项目根目录（新路径）
-  cd backend && python -m app.cli # 从 backend 目录
-"""
-import sys
-import os
-
-# 将 backend 目录加入 Python 路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
-
-from app.chains.basic_chain import run_basic_chain
-from app.chains.conversation_chain import run_conversation_chain
-from app.chains.multi_chain import run_sequential_chain, run_router_chain
-from app.chains.memory_examples import run_buffer_memory, run_summary_memory, run_manual_history
-from app.agents.agent_executor import run_simple_agent
-from app.rag.rag_pipeline import run_rag_chain
-from app.examples.translator import run_translator, run_text_processor
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.DEBUG)
 
 
-def main():
-    print("=" * 60)
-    print("   LangChain 全套工程示例")
-    print("   引擎: DeepSeek")
-    print("=" * 60)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Optional startup logic
+    load_dotenv()
+    try:
+        set_up_db()
+    except Exception as e:
+        logging.warning(f"Database setup failed (optional, continuing): {e}")
+    yield
+    # Optional shutdown logic
 
-    if not os.getenv("DEEPSEEK_API_KEY"):
-        print("\n⚠️  请先配置 .env 文件，设置 DEEPSEEK_API_KEY")
-        print("   参考 backend/.env.example 文件\n")
-        return
 
-    examples = [
-        ("1", "基础链 (Basic Chain)", run_basic_chain),
-        ("2", "对话链 (Conversation Chain)", run_conversation_chain),
-        ("3", "顺序链 (Sequential Chain)", run_sequential_chain),
-        ("4", "路由链 (Router Chain)", run_router_chain),
-        ("5", "记忆管理 (Memory Examples)", lambda: (
-            run_buffer_memory(), run_summary_memory(), run_manual_history()
-        )),
-        ("6", "Agent 智能体", run_simple_agent),
-        ("7", "RAG 检索增强生成", run_rag_chain),
-        ("8", "翻译助手", run_translator),
-        ("9", "文本处理管道", run_text_processor),
-        ("0", "运行所有示例", None),
-    ]
+# Initialize the FastAPI app
+app: FastAPI = FastAPI(lifespan=lifespan)
 
-    print("\n请选择要运行的示例:")
-    for key, name, _ in examples:
-        print(f"  [{key}] {name}")
-    print("  [q] 退出")
+trusted_proxy_hosts = get_trusted_proxy_hosts()
+if trusted_proxy_hosts:
+    from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-    choice = input("\n请输入编号: ").strip()
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(trusted_proxy_hosts))
 
-    if choice == "q":
-        print("再见！")
-        return
-    elif choice == "0":
-        for _, name, func in examples:
-            if func:
-                print(f"\n{'='*50}")
-                print(f"  运行: {name}")
-                print(f"{'='*50}")
-                try:
-                    func()
-                except Exception as e:
-                    print(f"  ❌ 运行失败: {e}")
-    else:
-        for key, name, func in examples:
-            if key == choice and func:
-                print(f"\n{'='*50}")
-                print(f"  运行: {name}")
-                print(f"{'='*50}")
-                try:
-                    func()
-                except Exception as e:
-                    print(f"  ❌ 运行失败: {e}")
-                break
+# Mount static files (e.g., CSS, JS) and initialize Jinja2 templates
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+
+# --- Flash cookie middleware ---
+# Reads the flash cookie into request.state so templates can render it
+# server-side, then clears the cookie on the response.
+
+
+@app.middleware("http")
+async def flash_cookie_middleware(request: Request, call_next):
+    flash = get_flash_cookie(request)
+    request.state.flash = flash
+    response = await call_next(request)
+    if flash:
+        response.delete_cookie(FLASH_COOKIE_NAME, path="/")
+    return response
+
+
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    token = request.cookies.get(CSRF_COOKIE_NAME) or generate_csrf_token()
+    request.state.csrf_token = token
+
+    if csrf_enabled() and request.method in UNSAFE_HTTP_METHODS:
+        submitted = await extract_submitted_csrf_token(request)
+        if not validate_csrf_token(request, submitted):
+            return await csrf_error_handler(request, CsrfError())
+
+    response = await call_next(request)
+    if request.cookies.get(CSRF_COOKIE_NAME) != token:
+        set_csrf_cookie(response, token)
+    return response
+
+
+# --- Include Routers ---
+
+
+app.include_router(account.router)
+app.include_router(dashboard.router)
+app.include_router(invitation.router)
+app.include_router(organization.router)
+app.include_router(role.router)
+app.include_router(static_pages.router)
+app.include_router(user.router)
+app.include_router(langchain_router.router)
+app.include_router(agent_router.router)
+app.include_router(rag_router.router)
+app.include_router(upload_router.router)
+
+
+# --- Exception Handling Middlewares ---
+
+
+# Handle AuthenticationError by redirecting to login page
+@app.exception_handler(AuthenticationError)
+async def authentication_error_handler(request: Request, exc: AuthenticationError):
+    if is_htmx_request(request):
+        response = Response(status_code=200)
+        response.headers["HX-Redirect"] = str(request.url_for("read_login"))
+        return response
+    return RedirectResponse(
+        url=app.url_path_for("read_login"), status_code=status.HTTP_303_SEE_OTHER
+    )
+
+
+# Handle AlreadyAuthenticatedError by redirecting to dashboard
+@app.exception_handler(AlreadyAuthenticatedError)
+async def already_authenticated_error_handler(
+    request: Request, exc: AlreadyAuthenticatedError
+):
+    if is_htmx_request(request):
+        response = Response(status_code=200)
+        response.headers["HX-Redirect"] = str(request.url_for("read_dashboard"))
+        return response
+    return RedirectResponse(
+        url=app.url_path_for("read_dashboard"), status_code=status.HTTP_302_FOUND
+    )
+
+
+# Handle RateLimitError (429 Too Many Requests)
+@app.exception_handler(RateLimitError)
+async def rate_limit_error_handler(request: Request, exc: RateLimitError):
+    if is_htmx_request(request):
+        return toast_response(
+            request,
+            templates,
+            exc.detail,
+            level="danger",
+            status_code=429,
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+    user = await get_user_from_request(request)
+    response = templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {"status_code": 429, "detail": exc.detail, "errors": None, "user": user},
+        status_code=429,
+    )
+    response.headers["Retry-After"] = str(exc.retry_after)
+    return response
+
+
+@app.exception_handler(CsrfError)
+async def csrf_error_handler(request: Request, exc: CsrfError):
+    if is_htmx_request(request):
+        return toast_response(
+            request,
+            templates,
+            exc.detail,
+            level="danger",
+            status_code=403,
+        )
+    user = await get_user_from_request(request)
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {"status_code": 403, "detail": exc.detail, "errors": None, "user": user},
+        status_code=403,
+    )
+
+
+# Handle CredentialsError (invalid email/password) with toast for HTMX
+@app.exception_handler(CredentialsError)
+async def credentials_exception_handler(request: Request, exc: CredentialsError):
+    if is_htmx_request(request):
+        return toast_response(
+            request,
+            templates,
+            exc.detail or "Invalid email or password.",
+            level="danger",
+            status_code=401,
+        )
+    user = await get_user_from_request(request)
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+            "errors": None,
+            "user": user,
+        },
+        status_code=exc.status_code,
+    )
+
+
+# Handle NeedsNewTokens by setting new tokens and redirecting to same page
+@app.exception_handler(NeedsNewTokens)
+async def needs_new_tokens_handler(request: Request, exc: NeedsNewTokens):
+    # Preserve query string so GET routes with query params work after token refresh
+    redirect_url = str(request.url)
+    response = RedirectResponse(
+        url=redirect_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+    set_auth_cookies(
+        response,
+        exc.access_token,
+        exc.refresh_token,
+        persistent=refresh_token_is_persistent(exc.refresh_token),
+    )
+    return response
+
+
+# Handle PasswordValidationError by rendering the validation_error page
+@app.exception_handler(PasswordValidationError)
+async def password_validation_exception_handler(
+    request: Request, exc: PasswordValidationError
+) -> Response:
+    if is_htmx_request(request):
+        detail = exc.detail
+        if isinstance(detail, dict):
+            message = detail.get("message", str(detail))
         else:
-            print("无效选择")
+            message = str(detail)
+        return toast_response(
+            request,
+            templates,
+            message,
+            level="danger",
+            status_code=422,
+        )
+    detail = exc.detail
+    if isinstance(detail, dict):
+        field = detail.get("field", "Error")
+        message = detail.get("message", str(detail))
+    else:
+        field = "Error"
+        message = str(detail)
+    user = await get_user_from_request(request)
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {
+            "status_code": 422,
+            "detail": None,
+            "errors": {field.replace("_", " ").title(): message},
+            "user": user,
+        },
+        status_code=422,
+    )
+
+
+# Handle RequestValidationError by rendering the error page
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = {}
+
+    # Map error types to user-friendly message templates
+    error_templates = {
+        "pattern_mismatch": "this field cannot be empty or contain only whitespace",
+        "string_too_short": "this field is required",
+        "missing": "this field is required",
+        "string_pattern_mismatch": "this field cannot be empty or contain only whitespace",
+        "enum": "invalid value",
+    }
+
+    for error in exc.errors():
+        # Handle different error locations carefully
+        location = error["loc"]
+
+        # Skip type errors for the whole body
+        if len(location) == 1 and location[0] == "body":
+            continue
+
+        # For form fields, the location might be just (field_name,)
+        # For JSON body, it might be (body, field_name)
+        # For array items, it might be (field_name, array_index)
+        field_name = location[-2] if isinstance(location[-1], int) else location[-1]
+
+        # Format the field name to be more user-friendly
+        display_name = field_name.replace("_", " ").title()
+
+        # Use mapped message if available, otherwise use FastAPI's message
+        error_type = error.get("type", "")
+        message_template = error_templates.get(error_type, error["msg"])
+
+        # For array items, append the index to the message
+        if isinstance(location[-1], int):
+            message_template = f"Item {location[-1] + 1}: {message_template}"
+
+        errors[display_name] = message_template
+
+    if is_htmx_request(request):
+        message = (
+            "; ".join(f"{k}: {v}" for k, v in errors.items())
+            if errors
+            else "Validation error"
+        )
+        return toast_response(
+            request,
+            templates,
+            message,
+            level="danger",
+            status_code=422,
+        )
+
+    user = await get_user_from_request(request)
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {"status_code": 422, "detail": None, "errors": errors, "user": user},
+        status_code=422,
+    )
+
+
+# Handle StarletteHTTPException (including 404, 405, etc.) by rendering the error page
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if is_htmx_request(request):
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return toast_response(
+            request,
+            templates,
+            detail,
+            level="danger",
+            status_code=exc.status_code,
+        )
+    user = await get_user_from_request(request)
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {
+            "status_code": exc.status_code,
+            "detail": exc.detail,
+            "errors": None,
+            "user": user,
+        },
+        status_code=exc.status_code,
+    )
+
+
+# Add handler for uncaught exceptions (500 Internal Server Error)
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    # Log the error for debugging
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+    if is_htmx_request(request):
+        return toast_response(
+            request,
+            templates,
+            "Internal Server Error",
+            level="danger",
+            status_code=500,
+        )
+
+    user = await get_user_from_request(request)
+
+    return templates.TemplateResponse(
+        request,
+        "errors/error.html",
+        {
+            "status_code": 500,
+            "detail": "Internal Server Error",
+            "errors": None,
+            "user": user,
+        },
+        status_code=500,
+    )
+
+
+# --- Home Page ---
+
+
+@app.get("/")
+async def read_home(
+    request: Request, _: None = Depends(require_unauthenticated_client)
+):
+    return templates.TemplateResponse(request, "index.html", {"user": None})
 
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)

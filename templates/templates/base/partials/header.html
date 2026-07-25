@@ -1,0 +1,59 @@
+{% from 'base/macros/logo.html' import render_logo %}
+
+
+<header class="navbar navbar-expand-lg navbar-light bg-light" hx-boost="true">
+    <div class="container-fluid">
+        <!-- Logo/Branding -->
+        <a class="navbar-brand site-navbar-brand" href="{{ url_for('read_home') }}">
+            {{ render_logo(classes="d-inline-block align-top me-2") }}
+            FastAPI-Jinja2-Postgres Webapp
+        </a>
+
+        <!-- Toggler for mobile -->
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="navbarContent">
+            {% include 'base/partials/nav.html' %}
+
+            {% if user %}
+            <!-- Mobile-only nav items: Profile and Logout as plain links -->
+            <ul class="navbar-nav d-lg-none">
+                <li class="nav-item" id="mobile-nav-profile">
+                    <a class="nav-link" href="{{ url_for('read_profile') }}">Profile</a>
+                </li>
+                <li class="nav-item" id="mobile-nav-logout">
+                    <a class="nav-link" href="{{ url_for('logout') }}">Logout</a>
+                </li>
+            </ul>
+            {% endif %}
+
+            {% if user %}
+            <!-- Desktop-only: User Profile Dropdown with avatar -->
+            <ul class="navbar-nav ms-auto mb-lg-0 d-none d-lg-flex">
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        {% include 'base/partials/navbar_avatar.html' %}
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                        <li><a class="dropdown-item" href="{{ url_for('read_profile') }}">Profile</a></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+                    </ul>
+                </li>
+            </ul>
+            {% else %}
+            <!-- Login/Register links (all screen sizes) -->
+            <ul class="navbar-nav ms-auto mb-lg-0">
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('read_login') }}">Login</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{{ url_for('read_register') }}">Register</a>
+                </li>
+            </ul>
+            {% endif %}
+        </div>
+    </div>
+</header>

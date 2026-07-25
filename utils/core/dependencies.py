@@ -1,0 +1,455 @@
+import logging
+from fastapi import Depends, Form, Query, Request
+from pydantic import EmailStr
+from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
+from datetime import UTC, datetime
+from typing import Optional, Tuple, Generator
+from utils.core.auth import (
+    validate_token,
+    create_access_token,
+    create_tracked_refresh_token,
+    revoke_all_refresh_tokens,
+    oauth2_scheme_cookie,
+    verify_password,
+)
+from utils.core.db import create_engine, get_connection_url
+from utils.core.models import (
+    User,
+    Role,
+    AccountRecoveryToken,
+    PasswordResetToken,
+    EmailVerificationToken,
+    RefreshToken,
+    Account,
+)
+from exceptions.http_exceptions import (
+    AlreadyAuthenticatedError,
+    AuthenticationError,
+    CredentialsError,
+    DataIntegrityError,
+    PasswordValidationError,
+)
+from exceptions.exceptions import NeedsNewTokens
+from utils.core.invitations import get_invitation_token_warning
+
+logger = logging.getLogger(__name__)
+
+
+def get_session() -> Generator[Session, None, None]:
+    """
+    Provides a database session for executing queries.
+
+    Yields:
+        Session: A SQLModel session object for database operations.
+    """
+    engine = create_engine(get_connection_url())
+    with Session(engine) as session:
+        yield session
+
+
+def validate_token_and_get_account(
+    token: str, token_type: str, session: Session
+) -> tuple[Optional[Account], Optional[str], Optional[str]]:
+    """
+    Validates a token and returns the associated account if valid.
+    For refresh tokens, performs server-side JTI validation with reuse detection.
+
+    Args:
+        token: JWT token to validate
+        token_type: Type of token ('access' or 'refresh')
+        session: Database session
+
+    Returns:
+        Tuple containing the account (if valid), and new tokens (if refresh token)
+    """
+    decoded_token = validate_token(token, token_type=token_type)
+
+    if decoded_token:
+        user_email = decoded_token.get("sub")
+        account = session.exec(
+            select(Account).where(Account.email == user_email)
+        ).first()
+
+        if account:
+            assert account.id is not None
+            if token_type == "refresh":
+                jti = decoded_token.get("jti")
+                if not jti:
+                    # Legacy token without JTI — force re-login
+                    return None, None, None
+
+                db_token = session.exec(
+                    select(RefreshToken).where(RefreshToken.jti == jti)
+                ).first()
+
+                if not db_token or db_token.account_id != account.id:
+                    return None, None, None
+
+                if db_token.revoked:
+                    # Token reuse detected — revoke all tokens for this account
+                    logger.warning(
+                        f"Refresh token reuse detected for account {account.id}. "
+                        "Revoking all refresh tokens."
+                    )
+                    revoke_all_refresh_tokens(account.id, session)
+                    session.commit()
+                    return None, None, None
+
+                # Revoke the current token and issue new ones
+                db_token.revoked = True
+                persistent = bool(decoded_token.get("persistent", False))
+                new_access_token = create_access_token(data={"sub": account.email})
+                new_refresh_token = create_tracked_refresh_token(
+                    account.id, account.email, session, persistent=persistent
+                )
+                session.commit()
+                return account, new_access_token, new_refresh_token
+            return account, None, None
+    return None, None, None
+
+
+def get_account_from_credentials(
+    email: EmailStr = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_session),
+) -> Tuple[Account, Session]:
+    """
+    Validates user credentials and returns the account if valid.
+
+    Args:
+        email: Email address from form
+        password: Password from form
+        session: Database session
+
+    Returns:
+        Tuple containing the account and session
+
+    Raises:
+        HTTPException: If credentials are invalid
+    """
+    account = session.exec(select(Account).where(Account.email == email)).first()
+
+    if not account or not verify_password(password, account.hashed_password):
+        raise CredentialsError()
+
+    return account, session
+
+
+def get_account_from_tokens(
+    tokens: tuple[Optional[str], Optional[str]], session: Session
+) -> tuple[Optional[Account], Optional[str], Optional[str]]:
+    """
+    Attempts to get an account from access or refresh tokens.
+
+    Args:
+        tokens: Tuple of (access_token, refresh_token)
+        session: Database session
+
+    Returns:
+        Tuple containing the account (if valid), and new tokens (if using refresh token)
+    """
+    access_token, refresh_token = tokens
+
+    # Try to validate the access token first
+    account, _, _ = (
+        validate_token_and_get_account(access_token, "access", session)
+        if access_token
+        else (None, None, None)
+    )
+    if account:
+        return account, None, None
+
+    # If access token is invalid or missing, try the refresh token
+    if refresh_token:
+        account, new_access_token, new_refresh_token = validate_token_and_get_account(
+            refresh_token, "refresh", session
+        )
+        if account:
+            return account, new_access_token, new_refresh_token
+
+    # Return a tuple of None values if no valid account is found
+    return None, None, None
+
+
+def get_authenticated_account(
+    tokens: tuple[Optional[str], Optional[str]] = Depends(oauth2_scheme_cookie),
+    session: Session = Depends(get_session),
+) -> Account:
+    """
+    Dependency that returns the authenticated account or raises an exception.
+
+    Args:
+        tokens: Tuple of (access_token, refresh_token)
+        session: Database session
+
+    Returns:
+        The authenticated account
+
+    Raises:
+        AuthenticationError: If no valid account is found
+        NeedsNewTokens: If using refresh token and new tokens are generated
+    """
+    account, new_access_token, new_refresh_token = get_account_from_tokens(
+        tokens, session
+    )
+
+    if account:
+        if new_access_token and new_refresh_token:
+            # This will be caught by middleware to set new cookies
+            if account.user:
+                raise NeedsNewTokens(account.user, new_access_token, new_refresh_token)
+            else:
+                raise DataIntegrityError("User")
+        return account
+
+    raise AuthenticationError()
+
+
+def validate_token_and_get_user(
+    token: str, token_type: str, session: Session
+) -> tuple[Optional[User], Optional[str], Optional[str]]:
+    # Delegate to validate_token_and_get_account for shared JTI logic
+    account, new_access_token, new_refresh_token = validate_token_and_get_account(
+        token, token_type, session
+    )
+    if account and account.user:
+        return account.user, new_access_token, new_refresh_token
+    return None, None, None
+
+
+def get_user_from_tokens(
+    tokens: tuple[Optional[str], Optional[str]], session: Session
+) -> tuple[Optional[User], Optional[str], Optional[str]]:
+    access_token, refresh_token = tokens
+
+    # Try to validate the access token first
+    user, _, _ = (
+        validate_token_and_get_user(access_token, "access", session)
+        if access_token
+        else (None, None, None)
+    )
+    if user:
+        return user, None, None
+
+    # If access token is invalid or missing, try the refresh token
+    if refresh_token:
+        user, new_access_token, new_refresh_token = validate_token_and_get_user(
+            refresh_token, "refresh", session
+        )
+        if user:
+            return user, new_access_token, new_refresh_token
+
+    # Return a tuple of None values if no valid user is found
+    return None, None, None
+
+
+def get_authenticated_user(
+    tokens: tuple[Optional[str], Optional[str]] = Depends(oauth2_scheme_cookie),
+    session: Session = Depends(get_session),
+) -> User:
+    user, new_access_token, new_refresh_token = get_user_from_tokens(tokens, session)
+
+    if user:
+        if new_access_token and new_refresh_token:
+            raise NeedsNewTokens(user, new_access_token, new_refresh_token)
+        return user
+
+    raise AuthenticationError()
+
+
+# TODO: Maybe instead of an optional function, we have get_account and then
+# get_required_account, which just wraps it?
+def get_optional_user(
+    tokens: tuple[Optional[str], Optional[str]] = Depends(oauth2_scheme_cookie),
+    session: Session = Depends(get_session),
+) -> Optional[User]:
+    user, new_access_token, new_refresh_token = get_user_from_tokens(tokens, session)
+
+    if user:
+        if new_access_token and new_refresh_token:
+            raise NeedsNewTokens(user, new_access_token, new_refresh_token)
+        return user
+
+    return None
+
+
+def require_unauthenticated_client(
+    user: Optional[User] = Depends(get_optional_user),
+) -> None:
+    """
+    Dependency that ensures the client is NOT authenticated.
+    Raises AlreadyAuthenticatedError (caught by exception handler) if a user is found.
+    """
+    if user:
+        raise AlreadyAuthenticatedError()
+
+
+def require_unauthenticated_unless_invitation_warning(
+    invitation_token: Optional[str] = Query(None),
+    user: Optional[User] = Depends(get_optional_user),
+    session: Session = Depends(get_session),
+) -> None:
+    """
+    Allow authenticated users to view login/register when an invitation token
+    warning must be shown (expired or invalid invite links).
+    """
+    warning = (
+        get_invitation_token_warning(session, invitation_token)
+        if invitation_token
+        else None
+    )
+    if user and not warning:
+        raise AlreadyAuthenticatedError()
+
+
+def get_verified_account(
+    email: EmailStr = Form(
+        ..., title="Email", description="Account email address for verification"
+    ),
+    password: str = Form(
+        ..., title="Password", description="Account password for verification"
+    ),
+    account: Account = Depends(get_authenticated_account),
+) -> Account:
+    """
+    Dependency that returns an authenticated account after verifying credentials.
+    Wraps get_authenticated_account with an additional email/password check.
+    """
+    if email != account.email:
+        raise CredentialsError(message="Email does not match authenticated account")
+    if not verify_password(password, account.hashed_password):
+        raise PasswordValidationError(field="password", message="Password is incorrect")
+    return account
+
+
+def get_account_from_email_verification_token(
+    token: str, session: Session
+) -> tuple[Optional[Account], Optional[EmailVerificationToken]]:
+    """
+    Get account from an email verification token.
+
+    Returns:
+        Tuple of (account, token) if valid, or (None, None) if invalid
+    """
+    result = session.exec(
+        select(Account, EmailVerificationToken).where(
+            EmailVerificationToken.token == token,
+            EmailVerificationToken.expires_at > datetime.now(UTC),
+            EmailVerificationToken.used == False,  # noqa: E712
+            EmailVerificationToken.account_id == Account.id,
+        )
+    ).first()
+
+    if not result:
+        return None, None
+
+    account, verification_token = result
+    return account, verification_token
+
+
+def get_account_from_recovery_token(
+    token: str, session: Session
+) -> tuple[Optional[Account], Optional[AccountRecoveryToken]]:
+    """
+    Get account from an account recovery token.
+
+    Returns:
+        Tuple of (account, token) if valid, or (None, None) if invalid
+    """
+    result = session.exec(
+        select(Account, AccountRecoveryToken).where(
+            AccountRecoveryToken.token == token,
+            AccountRecoveryToken.expires_at > datetime.now(UTC),
+            AccountRecoveryToken.used == False,  # noqa: E712
+            AccountRecoveryToken.account_id == Account.id,
+        )
+    ).first()
+
+    if not result:
+        return None, None
+
+    account, recovery_token = result
+    return account, recovery_token
+
+
+def get_account_from_reset_token(
+    email: str, token: str, session: Session
+) -> tuple[Optional[Account], Optional[PasswordResetToken]]:
+    """
+    Get account from a password reset token.
+
+    Args:
+        email: Email address of the account
+        token: Password reset token
+        session: Database session
+
+    Returns:
+        Tuple of (account, token) if valid, or (None, None) if invalid
+    """
+    result = session.exec(
+        select(Account, PasswordResetToken).where(
+            Account.email == email,
+            PasswordResetToken.token == token,
+            PasswordResetToken.expires_at > datetime.now(UTC),
+            PasswordResetToken.used == False,  # noqa: E712
+            PasswordResetToken.account_id == Account.id,
+        )
+    ).first()
+
+    if not result:
+        return None, None
+
+    account, reset_token = result
+    return account, reset_token
+
+
+def get_user_with_relations(
+    user: User = Depends(get_authenticated_user),
+    session: Session = Depends(get_session),
+) -> User:
+    """
+    Returns an authenticated user with fully loaded role and organization relationships.
+    """
+    # Refresh the user instance with eagerly loaded relationships
+    eager_user = session.exec(
+        select(User)
+        .where(User.id == user.id)
+        .options(
+            selectinload(User.roles).selectinload(Role.organization),
+            selectinload(User.roles).selectinload(Role.permissions),
+        )
+    ).one()
+
+    return eager_user
+
+
+async def get_user_from_request(request: Request) -> Optional[User]:
+    """
+    Helper function to get user from request cookies in exception handlers.
+    Exception handlers can't use Depends(), so we manually extract tokens and get the user.
+    """
+    access_token = request.cookies.get("access_token")
+    refresh_token = request.cookies.get("refresh_token")
+    tokens = (access_token, refresh_token)
+
+    # Get a database session
+    engine = create_engine(get_connection_url())
+    with Session(engine) as session:
+        user, new_access_token, new_refresh_token = get_user_from_tokens(
+            tokens, session
+        )
+
+        # If we got new tokens, we'd normally raise NeedsNewTokens, but in an exception
+        # handler we can't do that easily. For now, just return the user.
+        # The tokens will be refreshed on the next request.
+        if user and new_access_token and new_refresh_token:
+            # Note: We can't easily set cookies here since we're in an exception handler.
+            # The user will need to make another request to get new tokens.
+            pass
+
+        if user:
+            # Eagerly load avatar so it's available after the session closes
+            _ = user.avatar
+
+        return user

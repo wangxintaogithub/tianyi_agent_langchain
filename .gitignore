@@ -1,27 +1,27 @@
-# Python
-__pycache__/
+__pycache__
 *.pyc
-*.pyo
-.pytest_cache/
-*.egg-info/
-dist/
-build/
-
-# Node / Frontend
-node_modules/
-frontend/dist/
-
-# Environment
 .env
 .env.local
+.env.development
+.env.production
+_environment
+/.quarto/
+_docs/
+*.ipynb
+.pytest_cache/
+.ty/
+node_modules
+package-lock.json
+package.json
+.specstory
+repomix-output.txt
+artifacts/
+.cursorindexingignore
+# Great Docs build directory (ephemeral, do not commit)
+great-docs/
 
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
+# Great Docs versioned-build artifacts
+_great_docs_build/
+.great-docs-build/
+.great-docs-cache/
+.great-docs/
