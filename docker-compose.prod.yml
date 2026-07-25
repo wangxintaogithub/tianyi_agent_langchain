@@ -1,0 +1,84 @@
+# 生产环境 Docker Compose
+# 在 docker-compose.yml 基础上叠加部署配置
+#
+# 域名：xiaoyuetech.online
+#
+# 使用方式：
+#   set DEEPSEEK_API_KEY=sk-xxx
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+version: "3.9"
+
+services:
+  # ========================
+  # Traefik - 反向代理 + 自动 SSL
+  # ========================
+  traefik:
+    image: traefik:v3.1
+    container_name: langchain-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"      # HTTP（自动 301 重定向到 HTTPS）
+      - "443:443"    # HTTPS
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # Docker Provider
+      - traefik_data:/data                              # SSL 证书持久化
+    environment:
+      - ACME_EMAIL=super_shaun@163.com
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - langchain-net
+
+  # ========================
+  # 数据库 - 关闭外网端口
+  # ========================
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"   # 仅本地可连，外网通过 Traefik
+
+  # ========================
+  # 后端 - 通过 Traefik 反代，不暴露端口
+  # ========================
+  backend:
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:${DB_PASSWORD:-postgres}@db:5432/langchain_db
+      - VERBOSE=false
+      - CORS_ORIGINS=https://xiaoyuetech.online
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=langchain-net"
+
+      # 路由：/api/* 和 /health → backend
+      - "traefik.http.routers.backend.rule=Host(`xiaoyuetech.online`) && (PathPrefix(`/api`) || Path(`/health`))"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+
+  # ========================
+  # 前端 - 通过 Traefik 反代，不暴露端口
+  # ========================
+  frontend:
+    expose:
+      - "80"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=langchain-net"
+
+      # 路由：其他所有路径 → frontend
+      - "traefik.http.routers.frontend.rule=Host(`xiaoyuetech.online`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+      # 中间件：转发真实客户端 IP
+      - "traefik.http.middlewares.frontend-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
+
+volumes:
+  traefik_data:

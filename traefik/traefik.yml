@@ -1,0 +1,40 @@
+# Traefik 静态配置
+# 入口点、证书颁发、Provider 等全局设置
+
+global:
+  sendAnonymousUsage: false
+
+# 日志
+log:
+  level: INFO
+  format: json
+
+# HTTP 入口点
+entryPoints:
+  web:
+    address: ":80"
+    # HTTP 重定向到 HTTPS
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+
+# Let's Encrypt 自动 SSL
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: ${ACME_EMAIL:-super_shaun@163.com}   # 自行替换为真实邮箱
+      storage: /data/acme.json                   # 证书存储
+      httpChallenge:
+        entryPoint: web
+
+# Docker Provider - 从容器标签自动发现路由
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false      # 仅暴露带 traefik.enable=true 标签的容器
+    network: langchain-net
