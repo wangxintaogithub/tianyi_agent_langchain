@@ -75,7 +75,7 @@ services:
       - DB_PORT=5432
       - DB_NAME=langchain_db
       - CSRF_ENABLED=1
-      - CORS_ORIGINS=https://xiaoyuetech.online
+      - CORS_ORIGINS=https://xiaoyuetech.online,https://www.xiaoyuetech.online
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=langchain-net"
@@ -86,6 +86,16 @@ services:
       - "traefik.http.routers.app.tls=true"
       - "traefik.http.routers.app.tls.certresolver=letsencrypt"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
+
+      # www → 裸域名 301 重定向（SEO 友好）
+      - "traefik.http.routers.www.rule=Host(`www.xiaoyuetech.online`)"
+      - "traefik.http.routers.www.entrypoints=websecure"
+      - "traefik.http.routers.www.tls=true"
+      - "traefik.http.routers.www.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.www.middlewares=www-redirect"
+      - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\\\.xiaoyuetech\\\\.online(.*)"
+      - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://xiaoyuetech.online$${1}"
+      - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
 
       # 中间件：转发真实客户端 IP
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=https"

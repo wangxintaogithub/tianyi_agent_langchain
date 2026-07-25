@@ -37,7 +37,6 @@ COPY utils/ utils/
 COPY templates/ templates/
 COPY static/ static/
 COPY exceptions/ exceptions/
-COPY .env ./
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
