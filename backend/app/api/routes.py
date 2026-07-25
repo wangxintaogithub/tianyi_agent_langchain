@@ -187,7 +187,7 @@ async def upload_files(
             results.append({
                 "filename": filename,
                 "status": "skipped",
-                "reason": f"文件超过大小限制 (50MB)",
+                "reason": "文件超过大小限制 (50MB)",
             })
             continue
 
