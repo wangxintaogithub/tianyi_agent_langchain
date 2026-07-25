@@ -96,6 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, frontend, docker]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: prod
 
     steps:
       - name: 安装 SSH 密钥
