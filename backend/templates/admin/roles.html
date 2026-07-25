@@ -1,0 +1,61 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex align-items-center">
+      <span class="avatar avatar-lg bg-primary-lt me-3">👤</span>
+      <div>
+        <strong>{{ user.display_name }}</strong><br>
+        <span class="text-muted small">当前角色：</span>
+        {% set role_colors = {"admin":"bg-red","editor":"bg-blue","viewer":"bg-green"} %}
+        {% set role_names = {"admin":"超级管理员","editor":"编辑员","viewer":"观察者"} %}
+        <span class="badge {{ role_colors.get(user.role, 'bg-secondary') }}">
+          {{ role_names.get(user.role, user.role) }}
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">角色权限矩阵</h3>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>角色</th>
+          <th>仪表盘</th>
+          <th>查看用户</th>
+          <th>创建用户</th>
+          <th>编辑用户</th>
+          <th>删除用户</th>
+          <th>管理角色</th>
+          <th>描述</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for role_key, role_data in roles.items() %}
+        {% set perm = role_data.permissions %}
+        <tr>
+          <td><strong>{{ role_data.name }}</strong></td>
+          <td>{% if 'dashboard' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td>{% if 'users_view' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td>{% if 'users_create' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td>{% if 'users_edit' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td>{% if 'users_delete' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td>{% if 'roles_view' in perm %}<span class="text-success">✅</span>{% else %}<span class="text-muted">❌</span>{% endif %}</td>
+          <td class="text-muted small">
+            {% if role_key == 'admin' %}全部权限
+            {% elif role_key == 'editor' %}用户管理（不含删除）
+            {% else %}仅查看
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
