@@ -103,6 +103,15 @@ services:
       - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://xiaoyuetech.online$${1}"
       - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
 
+      # www API 路由（直接转发，不重定向）
+      # 用于 Google Apps Script 等无法解析裸域名 DNS 的场景
+      - "traefik.http.routers.www-api.rule=Host(`www.xiaoyuetech.online`) && PathPrefix(`/api/`)"
+      - "traefik.http.routers.www-api.entrypoints=websecure"
+      - "traefik.http.routers.www-api.tls=true"
+      - "traefik.http.routers.www-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.www-api.middlewares=app-headers"
+      - "traefik.http.routers.www-api.service=app"
+
       # 中间件：转发真实客户端 IP
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
     networks:
