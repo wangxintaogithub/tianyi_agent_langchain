@@ -10,7 +10,7 @@
 // ============================================================
 
 // ========== 配置区（请修改） ==========
-const API_ENDPOINT = 'https://www.xiaoyuetech.online/api/upload';
+const API_ENDPOINT = 'https://xiaoyuetech.online/api/upload';
 const API_KEY = '你的 API_UPLOAD_KEY';  // 与服务端 API_UPLOAD_KEY 一致
 const UPLOAD_TO_COS = true;             // 是否上传到腾讯云 COS
 const SEND_TO_WECHAT = true;            // 是否发送企业微信通知
@@ -121,7 +121,6 @@ function uploadEmailToAPI(message, attachments) {
       Authorization: 'Bearer ' + API_KEY,
     },
     muteHttpExceptions: true,
-    validateHttpsCertificates: false,  // GAS SSL 校验较严格，跳过证书验证
   };
 
   // 打印请求详情以便调试
