@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir \
     jinja2 aiofiles itsdangerous \
     pydantic email-validator \
     httptools \
+    pillow \
     resend
 
 # 2) 安装 LangChain 生态
