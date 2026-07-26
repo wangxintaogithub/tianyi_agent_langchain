@@ -77,6 +77,19 @@ if trusted_proxy_hosts:
 
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(trusted_proxy_hosts))
 
+# --- HTTPS scheme middleware ---
+# When behind Traefik reverse proxy, ensure url_for() generates HTTPS URLs
+# by reading the X-Forwarded-Proto header set by Traefik's app-headers middleware.
+
+
+@app.middleware("http")
+async def https_scheme_middleware(request: Request, call_next):
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    if forwarded_proto == "https":
+        request.scope["scheme"] = "https"
+    return await call_next(request)
+
+
 # Mount static files (e.g., CSS, JS) and initialize Jinja2 templates
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")

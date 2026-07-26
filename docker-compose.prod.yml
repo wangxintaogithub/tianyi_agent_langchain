@@ -98,7 +98,7 @@ services:
       - "traefik.http.routers.www.entrypoints=websecure"
       - "traefik.http.routers.www.tls=true"
       - "traefik.http.routers.www.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.www.middlewares=www-redirect"
+      - "traefik.http.routers.www.middlewares=www-redirect,app-headers"
       - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\\\.xiaoyuetech\\\\.online(.*)"
       - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://xiaoyuetech.online$${1}"
       - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
