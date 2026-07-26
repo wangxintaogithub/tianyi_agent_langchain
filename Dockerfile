@@ -15,9 +15,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 复制依赖文件
 COPY pyproject.toml uv.lock* ./
 
-# 升级 pip 并设置超时/重试参数
+# 升级 pip 并设置超时/重试参数 + 腾讯云 PyPI 镜像（提升国内下载速度）
 ENV PIP_DEFAULT_TIMEOUT=300 \
-    PIP_RETRIES=5
+    PIP_RETRIES=5 \
+    PIP_INDEX_URL=https://mirrors.tencent.com/pypi/simple/ \
+    PIP_TRUSTED_HOST=mirrors.tencent.com
 
 RUN pip install --no-cache-dir --upgrade pip
 
