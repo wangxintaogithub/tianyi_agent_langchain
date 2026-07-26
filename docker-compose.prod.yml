@@ -76,6 +76,11 @@ services:
       - CSRF_ENABLED=1
       - CORS_ORIGINS=https://xiaoyuetech.online,https://www.xiaoyuetech.online
       - API_UPLOAD_KEY=${API_UPLOAD_KEY:?请设置 API_UPLOAD_KEY}
+      - TENCENT_COS_SECRET_ID=${TENCENT_COS_SECRET_ID:-}
+      - TENCENT_COS_SECRET_KEY=${TENCENT_COS_SECRET_KEY:-}
+      - TENCENT_COS_REGION=${TENCENT_COS_REGION:-}
+      - TENCENT_COS_BUCKET=${TENCENT_COS_BUCKET:-}
+      - WECHAT_WEBHOOK_URL=${WECHAT_WEBHOOK_URL:-}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=langchain-net"
