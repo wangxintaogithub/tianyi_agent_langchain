@@ -35,8 +35,7 @@ services:
   # 数据库 - 关闭外网端口
   # ========================
   db:
-    ports:
-      - "127.0.0.1:5432:5432"   # 仅本地可连
+    ports: []   # 不暴露到宿主机，app 通过 Docker 内部网络连接 db:5432
     networks:
       - langchain-net
 
