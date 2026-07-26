@@ -75,6 +75,7 @@ services:
       - DB_NAME=langchain_db
       - CSRF_ENABLED=1
       - CORS_ORIGINS=https://xiaoyuetech.online,https://www.xiaoyuetech.online
+      - API_UPLOAD_KEY=${API_UPLOAD_KEY:?请设置 API_UPLOAD_KEY}
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=langchain-net"

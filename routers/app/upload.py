@@ -2,11 +2,28 @@
 文件上传 API - 解析 + COS + 企业微信通知
 """
 import os
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from utils.app.services.file_parser import parse_file
 from utils.app.services.cos_uploader import upload_file as cos_upload
 
 router = APIRouter(prefix="/api", tags=["Upload API"])
+security = HTTPBearer(auto_error=False)
+
+API_KEY = os.environ.get("API_UPLOAD_KEY", "")
+
+
+def verify_api_key(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
+    """验证 API Key（Authorization: Bearer <key>）"""
+    if not API_KEY:
+        # 未配置 API_KEY 时允许所有请求（兼容旧部署）
+        return
+    if credentials is None or credentials.credentials != API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="请在 Authorization 请求头中提供有效的 API Key，格式: Bearer <key>",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 ALLOWED_EXTENSIONS = {
     ".pdf", ".doc", ".docx",
@@ -24,6 +41,7 @@ async def upload_files(
     wechat_webhook: str | None = Form(None),
     send_to_wechat: bool = Form(True),
     upload_to_cos: bool = Form(True),
+    _auth=Depends(verify_api_key),
 ):
     """上传并处理多个文件
 
