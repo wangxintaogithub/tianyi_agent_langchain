@@ -15,7 +15,7 @@ git config http.version HTTP/1.1
 git config http.postBuffer 524288000
 git pull
 
-echo "===== 3. 清理旧 .env 文件（Docker Compose 会自动读取） ====="
+echo "===== 3. 清理旧 .env 文件 ====="
 rm -f .env
 
 echo "===== 4. 停止旧容器 ====="

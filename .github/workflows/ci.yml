@@ -33,7 +33,7 @@ jobs:
           flake8 routers/ utils/ exceptions/ main.py --count --max-complexity=10 --max-line-length=100 --statistics || echo "检查完成"
 
   # ============================================================
-  # Deploy: CI 通过后自动部署到腾讯云服务器
+  # Deploy: CI 通过后 SSH 到服务器构建并部署
   # ============================================================
   deploy:
     name: Deploy to Tencent Cloud
@@ -55,7 +55,10 @@ jobs:
 
       - name: 拉取最新代码
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=60 \
+              -o ServerAliveCountMax=5 \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             cd /home/ubuntu/tianyi_agent_langchain && \
             git config http.version HTTP/1.1 && \
             git config http.postBuffer 524288000 && \
@@ -64,7 +67,10 @@ jobs:
 
       - name: 通过 SSH 执行部署脚本
         run: |
-          ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -o StrictHostKeyChecking=no \
+              -o ServerAliveInterval=60 \
+              -o ServerAliveCountMax=5 \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
             export DEEPSEEK_API_KEY='${{ secrets.DEEPSEEK_API_KEY }}'
             export SECRET_KEY='${{ secrets.SECRET_KEY }}'
             export TENCENT_COS_SECRET_ID='${{ secrets.TENCENT_COS_SECRET_ID }}'
