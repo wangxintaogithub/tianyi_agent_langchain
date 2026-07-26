@@ -11,8 +11,17 @@ echo "===== 1. 进入项目目录 ====="
 cd "$APP_DIR" || { echo "❌ 目录 $APP_DIR 不存在"; exit 1; }
 
 echo "===== 2. 拉取最新代码（配置 Git 兼容参数） ====="
+# 切换到 SSH 协议（HTTPS 在国内容易 TLS 中断）
+REMOTE_URL=$(git remote get-url origin)
+if echo "$REMOTE_URL" | grep -q '^https://'; then
+  SSH_URL=$(echo "$REMOTE_URL" | sed 's|https://github.com/|git@github.com:|')
+  git remote set-url origin "$SSH_URL"
+  echo "已将 remote 切换为 SSH: $SSH_URL"
+fi
 git config http.version HTTP/1.1
 git config http.postBuffer 524288000
+git config http.lowSpeedLimit 0
+git config http.lowSpeedTime 999999
 git pull
 
 echo "===== 3. 清理旧 .env 文件 ====="
