@@ -93,25 +93,13 @@ services:
       - "traefik.http.routers.app.middlewares=app-headers"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
 
-      # www → 裸域名 301 重定向（SEO 友好）
+      # www 直接转发到 app（不再重定向，确保 SSL 正常工作）
       - "traefik.http.routers.www.rule=Host(`www.xiaoyuetech.online`)"
       - "traefik.http.routers.www.entrypoints=websecure"
       - "traefik.http.routers.www.tls=true"
       - "traefik.http.routers.www.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.www.middlewares=www-redirect,app-headers"
-      - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\\\.xiaoyuetech\\\\.online(.*)"
-      - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://xiaoyuetech.online$${1}"
-      - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
-
-      # www API 路由（直接转发，不重定向，优先级高于 www 重定向路由）
-      # 用于 Google Apps Script 等无法解析裸域名 DNS 的场景
-      - "traefik.http.routers.www-api.rule=Host(`www.xiaoyuetech.online`) && PathPrefix(`/api/`)"
-      - "traefik.http.routers.www-api.entrypoints=websecure"
-      - "traefik.http.routers.www-api.tls=true"
-      - "traefik.http.routers.www-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.www-api.middlewares=app-headers"
-      - "traefik.http.routers.www-api.service=app"
-      - "traefik.http.routers.www-api.priority=10"
+      - "traefik.http.routers.www.middlewares=app-headers"
+      - "traefik.http.routers.www.service=app"
 
       # 中间件：转发真实客户端 IP
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
