@@ -10,7 +10,9 @@ APP_DIR="/home/ubuntu/tianyi_agent_langchain"
 echo "===== 1. 进入项目目录 ====="
 cd "$APP_DIR" || { echo "❌ 目录 $APP_DIR 不存在"; exit 1; }
 
-echo "===== 2. 拉取最新代码 ====="
+echo "===== 2. 拉取最新代码（配置 Git 兼容参数） ====="
+git config http.version HTTP/1.1
+git config http.postBuffer 524288000
 git pull
 
 echo "===== 3. 清理旧 .env 文件（Docker Compose 会自动读取） ====="
