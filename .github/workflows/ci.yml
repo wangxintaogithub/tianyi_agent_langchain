@@ -38,6 +38,9 @@ jobs:
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_tag: ${{ steps.build.outputs.DIGEST }}
     steps:
