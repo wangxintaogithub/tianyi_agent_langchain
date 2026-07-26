@@ -85,13 +85,22 @@ services:
       - "traefik.enable=true"
       - "traefik.docker.network=langchain-net"
 
-      # 所有流量 → app 服务
+      # HTTP → HTTPS 重定向（用于 app 路由，排除 ACME 验证路径）
+      - "traefik.http.middlewares.http-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.http-redirect.redirectscheme.permanent=true"
+
+      # 所有流量 → app 服务（HTTPS）
       - "traefik.http.routers.app.rule=Host(`xiaoyuetech.online`)"
       - "traefik.http.routers.app.entrypoints=websecure"
       - "traefik.http.routers.app.tls=true"
       - "traefik.http.routers.app.tls.certresolver=letsencrypt"
       - "traefik.http.routers.app.middlewares=app-headers"
       - "traefik.http.services.app.loadbalancer.server.port=8000"
+
+      # HTTP 路由（仅重定向到 HTTPS，ACME 验证不会被拦截）
+      - "traefik.http.routers.app-http.rule=Host(`xiaoyuetech.online`)"
+      - "traefik.http.routers.app-http.entrypoints=web"
+      - "traefik.http.routers.app-http.middlewares=http-redirect"
 
       # www → 裸域名 301 重定向（SEO 友好）
       - "traefik.http.routers.www.rule=Host(`www.xiaoyuetech.online`)"
@@ -103,6 +112,11 @@ services:
       - "traefik.http.middlewares.www-redirect.redirectregex.regex=^https://www\\\\.xiaoyuetech\\\\.online(.*)"
       - "traefik.http.middlewares.www-redirect.redirectregex.replacement=https://xiaoyuetech.online$${1}"
       - "traefik.http.middlewares.www-redirect.redirectregex.permanent=true"
+
+      # www HTTP 路由（也重定向到 HTTPS）
+      - "traefik.http.routers.www-http.rule=Host(`www.xiaoyuetech.online`)"
+      - "traefik.http.routers.www-http.entrypoints=web"
+      - "traefik.http.routers.www-http.middlewares=http-redirect"
 
       # 中间件：转发真实客户端 IP
       - "traefik.http.middlewares.app-headers.headers.customrequestheaders.X-Forwarded-Proto=https"
