@@ -27,7 +27,7 @@ entryPoints:
 certificatesResolvers:
   letsencrypt:
     acme:
-      email: ${ACME_EMAIL:-super_shaun@163.com}   # 自行替换为真实邮箱
+      email: ${ACME_EMAIL:super_shaun@163.com}   # 自行替换为真实邮箱
       storage: /data/acme.json                   # 证书存储
       httpChallenge:
         entryPoint: web

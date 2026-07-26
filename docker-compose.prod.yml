@@ -14,7 +14,7 @@ services:
   # Traefik - 反向代理 + 自动 SSL
   # ========================
   traefik:
-    image: traefik:v3.3
+    image: traefik:latest
     container_name: langchain-traefik
     restart: unless-stopped
     ports:
