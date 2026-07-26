@@ -30,13 +30,25 @@ rm -f .env
 echo "===== 4. 停止旧容器 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml down || true
 
-echo "===== 5. 重新构建并启动 ====="
+echo "===== 5. 等待端口释放 ====="
+# Docker 停止容器后端口可能未立即释放，等待最多 15 秒
+for i in $(seq 1 15); do
+  if ss -tln 2>/dev/null | grep -q ':5432 '; then
+    echo "  端口 5432 仍被占用，等待 ${i}s..."
+    sleep 1
+  else
+    echo "  端口 5432 已释放"
+    break
+  fi
+done
+
+echo "===== 6. 重新构建并启动 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
-echo "===== 6. 清理旧镜像 ====="
+echo "===== 7. 清理旧镜像 ====="
 docker image prune -f
 
-echo "===== 7. 检查容器状态 ====="
+echo "===== 8. 检查容器状态 ====="
 sleep 3
 docker ps
 
