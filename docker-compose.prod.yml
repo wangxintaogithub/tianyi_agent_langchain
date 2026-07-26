@@ -50,7 +50,7 @@ services:
   #   - /*             → 首页及其他页面
   # ========================
   app:
-    image: ${DOCKER_USERNAME}/tianyi-agent-langchain:latest
+    image: ghcr.io/wangxintaogithub/tianyi_agent_langchain:latest
     container_name: tianyi-app
     restart: unless-stopped
     expose:
