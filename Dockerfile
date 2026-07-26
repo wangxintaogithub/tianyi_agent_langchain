@@ -32,6 +32,8 @@ RUN pip install --no-cache-dir \
     pydantic email-validator \
     httptools \
     pillow \
+    pymupdf \
+    python-docx \
     resend
 
 # 2) 安装 LangChain 生态
