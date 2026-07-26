@@ -24,8 +24,6 @@ services:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro   # Docker Provider
       - traefik_data:/data                              # SSL 证书持久化
-    environment:
-      - ACME_EMAIL=super_shaun@163.com
     depends_on:
       - app
     networks:

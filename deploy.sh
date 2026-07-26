@@ -47,15 +47,16 @@ done
 echo "===== 6. 强制移除旧容器（避免容器名冲突） ====="
 docker rm -f langchain-traefik tianyi-app tianyi-db 2>/dev/null || true
 
-echo "===== 7. 清除 Let's Encrypt ACME 缓存（强制重新申请证书） ====="
-# 先查出实际的卷名（Docker Compose 会自动加项目名前缀）
-ACME_VOLUME=$(docker volume ls --filter name=traefik_data --format "{{.Name}}" | head -1)
-if [ -n "$ACME_VOLUME" ]; then
-  echo "  找到卷: $ACME_VOLUME，清除 acme.json"
-  docker run --rm -v "$ACME_VOLUME":/data alpine sh -c "rm -f /data/acme.json && echo '  已清除'"
-else
-  echo "  未找到 traefik_data 卷，跳过"
-fi
+echo "===== 7. 保留 Let's Encrypt ACME 缓存（避免重复申请导致速率限制）======"
+# 注意：不清除 acme.json，让 Traefik 复用已有证书。
+# 如需强制重新申请，可取消下面注释：
+# ACME_VOLUME=$(docker volume ls --filter name=traefik_data --format "{{.Name}}" | head -1)
+# if [ -n "$ACME_VOLUME" ]; then
+#   echo "  找到卷: $ACME_VOLUME，清除 acme.json"
+#   docker run --rm -v "$ACME_VOLUME":/data alpine sh -c "rm -f /data/acme.json && echo '  已清除'"
+# else
+#   echo "  未找到 traefik_data 卷，跳过"
+# fi
 
 echo "===== 8. 重新构建并启动 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --force-recreate
