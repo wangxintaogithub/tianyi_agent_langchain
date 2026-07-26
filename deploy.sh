@@ -47,13 +47,16 @@ done
 echo "===== 6. 强制移除旧容器（避免容器名冲突） ====="
 docker rm -f langchain-traefik tianyi-app tianyi-db 2>/dev/null || true
 
-echo "===== 7. 重新构建并启动 ====="
+echo "===== 7. 清除 Let's Encrypt ACME 缓存（强制重新申请证书） ====="
+docker run --rm -v traefik_data:/data alpine sh -c "rm -f /data/acme.json" 2>/dev/null || true
+
+echo "===== 8. 重新构建并启动 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --force-recreate
 
-echo "===== 8. 清理旧镜像 ====="
+echo "===== 9. 清理旧镜像 ====="
 docker image prune -f
 
-echo "===== 9. 检查容器状态 ====="
+echo "===== 10. 检查容器状态 ====="
 sleep 3
 docker ps
 
