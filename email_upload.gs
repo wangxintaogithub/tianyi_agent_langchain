@@ -121,6 +121,7 @@ function uploadEmailToAPI(message, attachments) {
       Authorization: 'Bearer ' + API_KEY,
     },
     muteHttpExceptions: true,
+    validateHttpsCertificates: false,  // GAS SSL 校验较严格，跳过证书验证
   };
 
   try {
