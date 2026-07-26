@@ -350,6 +350,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Handle StarletteHTTPException (including 404, 405, etc.) by rendering the error page
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    # API 路由返回 JSON 格式错误
+    if request.url.path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": detail},
+        )
     if is_htmx_request(request):
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
         return toast_response(
@@ -387,6 +395,11 @@ async def general_exception_handler(request: Request, exc: Exception):
             level="danger",
             status_code=500,
         )
+
+    # API 路由返回 JSON
+    if request.url.path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
     user = await get_user_from_request(request)
 
