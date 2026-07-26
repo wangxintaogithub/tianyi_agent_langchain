@@ -22,7 +22,9 @@ git config http.version HTTP/1.1
 git config http.postBuffer 524288000
 git config http.lowSpeedLimit 0
 git config http.lowSpeedTime 999999
-git pull
+# 强制与远程 main 分支同步，丢弃本地差异（部署场景安全）
+git fetch origin
+git reset --hard origin/main
 
 echo "===== 3. 清理旧 .env 文件 ====="
 rm -f .env
