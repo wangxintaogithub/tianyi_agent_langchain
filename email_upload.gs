@@ -124,10 +124,23 @@ function uploadEmailToAPI(message, attachments) {
     validateHttpsCertificates: false,  // GAS SSL 校验较严格，跳过证书验证
   };
 
+  // 打印请求详情以便调试
+  console.log(`📤 请求: POST ${API_ENDPOINT}`);
+  console.log(`📤 文件数: ${formData.files.length}（邮件正文 + ${attachments.length} 个附件）`);
+  console.log(`📤 附件列表: ${attachments.map(a => `${a.getName()} (${(a.getSize() / 1024).toFixed(1)}KB)`).join(', ')}`);
+  // 估算总请求体大小
+  const totalSizeKB = attachments.reduce((s, a) => s + a.getSize(), 0) / 1024;
+  console.log(`📤 附件总大小: ${totalSizeKB.toFixed(1)}KB`);
+
   try {
     const response = UrlFetchApp.fetch(API_ENDPOINT, options);
     const respCode = response.getResponseCode();
     const respText = response.getContentText();
+    const respHeaders = response.getHeaders();
+
+    console.log(`📥 响应状态码: ${respCode}`);
+    console.log(`📥 响应头: ${JSON.stringify(respHeaders)}`);
+    console.log(`📥 响应体(前500字): ${respText.slice(0, 500)}`);
 
     if (respCode >= 200 && respCode < 300) {
       console.log(`✅ 上传成功: ${message.getSubject()} (${respCode})`);
@@ -135,7 +148,11 @@ function uploadEmailToAPI(message, attachments) {
       console.error(`❌ 上传失败: ${message.getSubject()} (${respCode}): ${respText}`);
     }
   } catch (e) {
-    console.error(`❌ 上传异常: ${message.getSubject()}, 错误: ${e.toString()}`);
+    console.error(`❌ 上传异常: ${message.getSubject()}`);
+    console.error(`❌ 错误类型: ${e.name}`);
+    console.error(`❌ 错误消息: ${e.message}`);
+    console.error(`❌ 完整错误: ${e.toString()}`);
+    console.error(`❌ 错误堆栈: ${e.stack}`);
   }
 }
 
