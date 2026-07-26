@@ -99,6 +99,10 @@ async def flash_cookie_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def csrf_middleware(request: Request, call_next):
+    # API 路由跳过 CSRF 保护（供第三方程序调用）
+    if request.url.path.startswith("/api/"):
+        return await call_next(request)
+
     token = request.cookies.get(CSRF_COOKIE_NAME) or generate_csrf_token()
     request.state.csrf_token = token
 
