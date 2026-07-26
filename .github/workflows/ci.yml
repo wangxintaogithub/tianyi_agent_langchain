@@ -99,6 +99,7 @@ jobs:
       - name: 通过 SSH 执行部署脚本
         run: |
           ssh -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            export DOCKER_USERNAME='${{ secrets.DOCKER_USERNAME }}'
             export DEEPSEEK_API_KEY='${{ secrets.DEEPSEEK_API_KEY }}'
             export SECRET_KEY='${{ secrets.SECRET_KEY }}'
             export TENCENT_COS_SECRET_ID='${{ secrets.TENCENT_COS_SECRET_ID }}'
