@@ -18,7 +18,7 @@ from routers.core import (
 )
 from routers.app import langchain as langchain_router
 from routers.app import agent as agent_router
-from routers.app import rag as rag_router
+
 from routers.app import upload as upload_router
 from utils.core.dependencies import (
     get_user_from_request,
@@ -125,7 +125,6 @@ app.include_router(static_pages.router)
 app.include_router(user.router)
 app.include_router(langchain_router.router)
 app.include_router(agent_router.router)
-app.include_router(rag_router.router)
 app.include_router(upload_router.router)
 
 
