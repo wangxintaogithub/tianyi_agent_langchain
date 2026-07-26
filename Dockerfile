@@ -15,20 +15,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 复制依赖文件
 COPY pyproject.toml uv.lock* ./
 
-# 安装 Python 依赖
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir \
-        fastapi uvicorn[standard] \
-        sqlmodel bcrypt pyjwt \
-        python-multipart python-dotenv \
-        jinja2 aiofiles itsdangerous \
-        pydantic email-validator \
-        httptools \
-        resend \
-        langchain langchain-community langchain-core \
-        langchain-deepseek langchain-postgres \
-        psycopg2-binary \
-        sentence-transformers
+# 升级 pip 并设置超时/重试参数
+ENV PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=5
+
+RUN pip install --no-cache-dir --upgrade pip
+
+# 1) 先安装轻量 Web 依赖（不依赖 torch，构建快、层缓存友好）
+RUN pip install --no-cache-dir \
+    fastapi uvicorn[standard] \
+    sqlmodel bcrypt pyjwt \
+    python-multipart python-dotenv \
+    jinja2 aiofiles itsdangerous \
+    pydantic email-validator \
+    httptools \
+    resend
+
+# 2) 安装 LangChain 生态（不含 sentence-transformers，避免 torch）
+RUN pip install --no-cache-dir \
+    langchain langchain-community langchain-core \
+    langchain-deepseek langchain-postgres \
+    langchain-huggingface \
+    psycopg2-binary
+
+# 3) 单独安装 PyTorch（最大包，独立层——失败只需重试这一层）
+RUN pip install --no-cache-dir torch --extra-index-url https://download.pytorch.org/whl/cpu
+
+# 4) 最后安装 sentence-transformers（依赖 torch，但 torch 已缓存）
+RUN pip install --no-cache-dir sentence-transformers
 
 # 复制应用代码
 COPY main.py .

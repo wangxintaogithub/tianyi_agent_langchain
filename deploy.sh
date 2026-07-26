@@ -19,8 +19,9 @@ rm -f .env
 echo "===== 4. 停止旧容器 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml down || true
 
-echo "===== 5. 重新构建并启动 ====="
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+echo "===== 5. 拉取最新镜像并启动 ====="
+docker compose -f docker-compose.yml -f docker-compose.prod.yml pull app
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 echo "===== 6. 清理旧镜像 ====="
 docker image prune -f
