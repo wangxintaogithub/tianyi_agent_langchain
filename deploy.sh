@@ -21,8 +21,8 @@ rm -f .env
 echo "===== 4. 停止旧容器 ====="
 docker compose -f docker-compose.yml -f docker-compose.prod.yml down || true
 
-echo "===== 5. 启动容器（镜像已由 CI 通过 SCP 传入） ====="
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+echo "===== 5. 重新构建并启动 ====="
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 echo "===== 6. 清理旧镜像 ====="
 docker image prune -f
