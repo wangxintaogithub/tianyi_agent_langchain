@@ -25,6 +25,23 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials | None = Depends(se
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+def _sanitize_for_json(obj):
+    """递归地将对象转换为 JSON 可序列化的基本类型"""
+    import json
+    try:
+        json.dumps(obj)
+        return obj  # 已经是可序列化的
+    except (TypeError, ValueError):
+        if isinstance(obj, dict):
+            return {k: _sanitize_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [_sanitize_for_json(v) for v in obj]
+        elif isinstance(obj, Exception):
+            return f"[{type(obj).__name__}] {str(obj)[:200]}"
+        else:
+            return str(obj)
+
+
 ALLOWED_EXTENSIONS = {
     ".pdf", ".doc", ".docx",
     ".xls", ".xlsx", ".csv",
@@ -106,10 +123,13 @@ async def upload_files(
         success_count = sum(1 for r in results if r["status"] == "ok")
         skip_count = sum(1 for r in results if r["status"] == "skipped")
 
-        return {
+        response_data = {
             "total": len(results), "success": success_count, "skipped": skip_count,
             "results": results, "wechat_notify": wechat_resp,
         }
+
+        # 确保返回的数据全部 JSON 可序列化（字符串化所有非基本类型）
+        return _sanitize_for_json(response_data)
     except HTTPException:
         raise  # 让 FastAPI 正常处理 HTTPException
     except Exception as e:
