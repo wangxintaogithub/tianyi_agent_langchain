@@ -10,10 +10,10 @@
 // ============================================================
 
 // ========== 配置区（请修改） ==========
-const API_ENDPOINT = 'https://xiaoyuetech.online/api/upload';
-const API_KEY = '你的 API_UPLOAD_KEY';  // 与服务端 API_UPLOAD_KEY 一致
-const UPLOAD_TO_COS = true;             // 是否上传到腾讯云 COS
-const SEND_TO_WECHAT = true;            // 是否发送企业微信通知
+var API_ENDPOINT = 'https://xiaoyuetech.online/api/upload';
+var API_KEY = '你的 API_UPLOAD_KEY';  // 与服务端 API_UPLOAD_KEY 一致
+var UPLOAD_TO_COS = true;             // 是否上传到腾讯云 COS
+var SEND_TO_WECHAT = true;            // 是否发送企业微信通知
 // ======================================
 
 
@@ -91,9 +91,9 @@ function main() {
 }
 
 
-// ========== 调用 Upload API（multipart/form-data） ==========
+// ========== 一封邮件调用一次 API，上传所有附件 ==========
 function uploadEmailToAPI(message, attachments) {
-  // 构建邮件正文内容（作为第一个文件发送）
+  // 构建邮件正文内容
   const emailBody = buildEmailBody(message);
   const emailBlob = Utilities.newBlob(
     emailBody,
@@ -101,18 +101,21 @@ function uploadEmailToAPI(message, attachments) {
     `email-${message.getId()}.txt`
   );
 
-  // 构建 multipart form-data payload
-  // files 字段传入 Blob 数组，UrlFetchApp 会自动编码为 multipart
+  // 将所有附件转为标准 Blob（GmailAttachment 需通过 copyBlob 转换）
+  const allBlobs = [emailBlob];
+  attachments.forEach(a => allBlobs.push(a.copyBlob()));
+
+  console.log(`📤 共 ${allBlobs.length} 个文件，一次 API 上传...`);
+  allBlobs.forEach(b => {
+    const size = b.getBytes().length;
+    console.log(`   - ${b.getName()} (${(size / 1024).toFixed(1)}KB)`);
+  });
+
   const formData = {
-    files: [emailBlob],
+    files: allBlobs,
     upload_to_cos: UPLOAD_TO_COS ? 'true' : 'false',
     send_to_wechat: SEND_TO_WECHAT ? 'true' : 'false',
   };
-
-  // 逐个添加附件 Blob
-  attachments.forEach(attachment => {
-    formData.files.push(attachment);
-  });
 
   const options = {
     method: 'post',
@@ -123,35 +126,21 @@ function uploadEmailToAPI(message, attachments) {
     muteHttpExceptions: true,
   };
 
-  // 打印请求详情以便调试
-  console.log(`📤 请求: POST ${API_ENDPOINT}`);
-  console.log(`📤 文件数: ${formData.files.length}（邮件正文 + ${attachments.length} 个附件）`);
-  console.log(`📤 附件列表: ${attachments.map(a => `${a.getName()} (${(a.getSize() / 1024).toFixed(1)}KB)`).join(', ')}`);
-  // 估算总请求体大小
-  const totalSizeKB = attachments.reduce((s, a) => s + a.getSize(), 0) / 1024;
-  console.log(`📤 附件总大小: ${totalSizeKB.toFixed(1)}KB`);
-
   try {
     const response = UrlFetchApp.fetch(API_ENDPOINT, options);
     const respCode = response.getResponseCode();
     const respText = response.getContentText();
-    const respHeaders = response.getHeaders();
 
     console.log(`📥 响应状态码: ${respCode}`);
-    console.log(`📥 响应头: ${JSON.stringify(respHeaders)}`);
-    console.log(`📥 响应体(前500字): ${respText.slice(0, 500)}`);
+    console.log(`📥 响应体(前300字): ${respText.slice(0, 300)}`);
 
     if (respCode >= 200 && respCode < 300) {
       console.log(`✅ 上传成功: ${message.getSubject()} (${respCode})`);
     } else {
-      console.error(`❌ 上传失败: ${message.getSubject()} (${respCode}): ${respText}`);
+      console.error(`❌ 上传失败: ${message.getSubject()} (${respCode}): ${respText.slice(0, 300)}`);
     }
   } catch (e) {
-    console.error(`❌ 上传异常: ${message.getSubject()}`);
-    console.error(`❌ 错误类型: ${e.name}`);
-    console.error(`❌ 错误消息: ${e.message}`);
-    console.error(`❌ 完整错误: ${e.toString()}`);
-    console.error(`❌ 错误堆栈: ${e.stack}`);
+    console.error(`❌ 上传异常: ${message.getSubject()}: ${e.message}`);
   }
 }
 

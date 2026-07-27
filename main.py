@@ -300,6 +300,14 @@ async def password_validation_exception_handler(
 # Handle RequestValidationError by rendering the error page
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # API 路由返回 JSON 格式错误（供第三方程序调用）
+    if request.url.path.startswith("/api/"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=422,
+            content={"detail": exc.errors()},
+        )
+
     errors = {}
 
     # Map error types to user-friendly message templates
