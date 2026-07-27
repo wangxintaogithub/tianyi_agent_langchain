@@ -417,10 +417,10 @@ async def general_exception_handler(request: Request, exc: Exception):
             status_code=500,
         )
 
-    # API 路由返回 JSON
+    # API 路由返回 JSON（含具体错误信息，方便调试）
     if request.url.path.startswith("/api/"):
         from fastapi.responses import JSONResponse
-        return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+        return JSONResponse(status_code=500, content={"detail": f"Internal Server Error: {str(exc)}"})
 
     user = await get_user_from_request(request)
 
