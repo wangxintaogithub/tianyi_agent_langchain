@@ -303,9 +303,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     # API 路由返回 JSON 格式错误（供第三方程序调用）
     if request.url.path.startswith("/api/"):
         from fastapi.responses import JSONResponse
+        # 安全序列化：exc.errors() 中 ctx 可能包含不可序列化的 Exception 对象
+        safe_errors = []
+        for e in exc.errors():
+            safe = {"loc": list(e["loc"]), "msg": str(e["msg"]), "type": str(e.get("type", ""))}
+            safe_errors.append(safe)
         return JSONResponse(
             status_code=422,
-            content={"detail": exc.errors()},
+            content={"detail": safe_errors},
         )
 
     errors = {}
