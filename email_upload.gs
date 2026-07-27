@@ -1,176 +1,185 @@
-// ============================================================
-// Gmail → TianYi Upload API 自动转发脚本
-// 每 5 分钟检查未读邮件，有附件的自动上传到后端 API
-// ============================================================
-// 部署方式：
-//   1. 在 https://script.google.com 创建新项目
-//   2. 粘贴此代码
-//   3. 修改下方配置区的 API_ENDPOINT 和 API_KEY
-//   4. 运行 setupTrigger() 初始化定时触发器
-// ============================================================
+/**
+ * Gmail → TianYi Upload API
+ *
+ * 扫描未读邮件，将邮件正文 + 附件上传到后端 API。
+ * 定时触发器由用户在 GAS 编辑器里手动添加（指向 main 函数）。
+ *
+ * 部署：
+ *   1. https://script.google.com 新建项目
+ *   2. 粘贴本代码 → 保存
+ *   3. 编辑器左侧 ⏰ 触发器 → 添加触发器 → 选择 main / 时间驱动 / 任意频率
+ *   4. 首次运行会弹 OAuth 授权（需授予 Gmail + 外部 URL 权限）
+ */
 
-// ========== 配置区（请修改） ==========
-var API_ENDPOINT = 'https://xiaoyuetech.online/api/upload';
-var API_KEY = '你的 API_UPLOAD_KEY';  // 与服务端 API_UPLOAD_KEY 一致
-var UPLOAD_TO_COS = true;             // 是否上传到腾讯云 COS
-var SEND_TO_WECHAT = true;            // 是否发送企业微信通知
-// ======================================
-
-
-// ========== 设置定时触发器（每 5 分钟） ==========
-function setupTrigger() {
-  // 清除已有的 main 触发器，避免重复
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => {
-    if (t.getHandlerFunction() === 'main') {
-      ScriptApp.deleteTrigger(t);
-      console.log('已删除旧触发器');
-    }
-  });
-
-  // 创建每 5 分钟执行一次的触发器
-  ScriptApp.newTrigger('main')
-    .timeBased()
-    .everyMinutes(5)
-    .create();
-
-  console.log('✅ 定时触发器已创建，每 5 分钟执行一次 main()');
-}
+// ============== 配置 ==============
+const CONFIG = {
+  apiUrl:       'https://xiaoyuetech.online/api/upload',
+  apiToken:     '',
+  uploadToCos:  true,
+  sendToWechat: true,
+  searchQuery:  'is:unread has:attachment',   // 只扫描有附件的未读邮件
+};
+// ==================================
 
 
-// ========== 删除定时触发器 ==========
-function removeTrigger() {
-  const triggers = ScriptApp.getProjectTriggers();
-  triggers.forEach(t => {
-    if (t.getHandlerFunction() === 'main') {
-      ScriptApp.deleteTrigger(t);
-    }
-  });
-  console.log('🗑️ 已删除所有 main 触发器');
-}
+// ============== 主流程 ==============
 
-
-// ========== 主函数（每 5 分钟触发） ==========
 function main() {
-  console.log('🔄 [开始] 检查新邮件...');
-
-  const threads = GmailApp.search('is:unread');
-  console.log(`📬 未读会话数: ${threads.length}`);
+  Logger.log('=== main 开始 ===');
+  const threads = GmailApp.search(CONFIG.searchQuery);
+  Logger.log('命中未读会话：%s', threads.length);
 
   if (threads.length === 0) {
-    console.log('✅ [结束] 没有新邮件');
+    Logger.log('无新邮件，结束 ===');
     return;
   }
 
-  let processedCount = 0;
-  let uploadedCount = 0;
-
+  let uploaded = 0, skipped = 0;
   threads.forEach(thread => {
-    const messages = thread.getMessages();
-    messages.forEach(message => {
-      if (!message.isUnread()) return;
-
-      const subject = message.getSubject() || '(无主题)';
-      console.log(`📧 处理邮件: ${subject}`);
-
-      const attachments = message.getAttachments();
-      if (attachments.length > 0) {
-        console.log(`📎 发现 ${attachments.length} 个附件，调用 Upload API`);
-        uploadEmailToAPI(message, attachments);
-        uploadedCount++;
-      } else {
-        console.log(`⏭️ 无附件，跳过: ${subject}`);
+    thread.getMessages().forEach(msg => {
+      if (!msg.isUnread()) return;
+      try {
+        if (uploadMessage(msg)) uploaded++;
+        else skipped++;
+        msg.markRead();
+      } catch (e) {
+        Logger.log('✘ 处理失败: [%s] %s', msg.getSubject(), e.message);
       }
-
-      message.markRead();  // 标记已读，避免重复处理
-      processedCount++;
     });
   });
 
-  console.log(`✅ [结束] 处理 ${processedCount} 封，上传 ${uploadedCount} 封`);
+  Logger.log('=== main 结束：上传 %s / 跳过 %s ===', uploaded, skipped);
 }
 
 
-// ========== 一封邮件调用一次 API，上传所有附件 ==========
-function uploadEmailToAPI(message, attachments) {
-  // 构建邮件正文内容
-  const emailBody = buildEmailBody(message);
-  const emailBlob = Utilities.newBlob(
-    emailBody,
+/** 上传单封邮件。返回 true=已上传，false=跳过 */
+function uploadMessage(msg) {
+  const attachments = msg.getAttachments();
+  if (attachments.length === 0) {
+    Logger.log('⏭ 无附件，跳过: %s', msg.getSubject());
+    return false;
+  }
+
+  Logger.log('⇪ 上传: [%s] %s (附件 %s 个)',
+             msg.getFrom(), msg.getSubject(), attachments.length);
+
+  // 正文 → Blob
+  const bodyBlob = Utilities.newBlob(
+    buildEmailText(msg),
     'text/plain;charset=utf-8',
-    `email-${message.getId()}.txt`
+    `email-${msg.getId()}.txt`
   );
 
-  // 将所有附件转为标准 Blob（GmailAttachment 需通过 copyBlob 转换）
-  const allBlobs = [emailBlob];
-  attachments.forEach(a => allBlobs.push(a.copyBlob()));
-
-  console.log(`📤 共 ${allBlobs.length} 个文件，一次 API 上传...`);
-  allBlobs.forEach(b => {
-    const size = b.getBytes().length;
-    console.log(`   - ${b.getName()} (${(size / 1024).toFixed(1)}KB)`);
+  // 所有待上传文件
+  const files = [bodyBlob, ...attachments.map(a => a.copyBlob())];
+  files.forEach(b => {
+    Logger.log('   · %s (%s KB)', b.getName(), (b.getBytes().length / 1024).toFixed(1));
   });
 
-  const formData = {
-    files: allBlobs,
-    upload_to_cos: UPLOAD_TO_COS ? 'true' : 'false',
-    send_to_wechat: SEND_TO_WECHAT ? 'true' : 'false',
-  };
+  const payload = buildMultipart(files);
+  Logger.log('请求体总大小: %s B', payload.getBytes().length);
 
-  const options = {
-    method: 'post',
-    payload: formData,
-    headers: {
-      Authorization: 'Bearer ' + API_KEY,
-    },
+  const res = UrlFetchApp.fetch(CONFIG.apiUrl, {
+    method: 'POST',
+    payload,
+    headers: { Authorization: `Bearer ${CONFIG.apiToken}` },
     muteHttpExceptions: true,
-  };
+  });
 
-  try {
-    const response = UrlFetchApp.fetch(API_ENDPOINT, options);
-    const respCode = response.getResponseCode();
-    const respText = response.getContentText();
+  const code = res.getResponseCode();
+  Logger.log('⬇ 响应 %s: %s', code, res.getContentText().slice(0, 500));
 
-    console.log(`📥 响应状态码: ${respCode}`);
-    console.log(`📥 响应体(前300字): ${respText.slice(0, 300)}`);
-
-    if (respCode >= 200 && respCode < 300) {
-      console.log(`✅ 上传成功: ${message.getSubject()} (${respCode})`);
-    } else {
-      console.error(`❌ 上传失败: ${message.getSubject()} (${respCode}): ${respText.slice(0, 300)}`);
-    }
-  } catch (e) {
-    console.error(`❌ 上传异常: ${message.getSubject()}: ${e.message}`);
+  if (code < 200 || code >= 300) {
+    throw new Error(`HTTP ${code}`);
   }
+  Logger.log('✔ 上传成功');
+  return true;
 }
 
 
-// ========== 构建邮件正文文本 ==========
-function buildEmailBody(message) {
-  const lines = [
+// ============== 工具：Multipart 构造器 ==============
+
+/**
+ * 手动拼装 multipart/form-data。
+ *
+ * GAS 的 UrlFetchApp 在处理同名字段的多个 Blob 时编码不稳定，
+ * 所以我们直接拼字节。FastAPI/Python 端可以正常解析。
+ */
+function buildMultipart(files) {
+  const boundary = `----TianYi_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  const chunks = [];
+
+  // 文本字段
+  chunks.push(asBlob(makeField('upload_to_cos',  CONFIG.uploadToCos  ? 'true' : 'false', boundary)));
+  chunks.push(asBlob(makeField('send_to_wechat', CONFIG.sendToWechat ? 'true' : 'false', boundary)));
+
+  // 文件字段（同名 files）
+  files.forEach(file => {
+    chunks.push(asBlob(
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="files"; filename="${file.getName()}"\r\n` +
+      `Content-Type: ${file.getContentType()}\r\n\r\n`
+    ));
+    chunks.push(file);                          // 原始字节
+    chunks.push(asBlob('\r\n'));
+  });
+
+  chunks.push(asBlob(`--${boundary}--\r\n`));
+
+  // 合并字节数组
+  const out = [];
+  chunks.forEach(c => {
+    const bytes = c.getBytes();
+    for (let i = 0; i < bytes.length; i++) out.push(bytes[i]);
+  });
+
+  return Utilities.newBlob(out, `multipart/form-data; boundary=${boundary}`);
+}
+
+function makeField(name, value, boundary) {
+  return `--${boundary}\r\n` +
+         `Content-Disposition: form-data; name="${name}"\r\n\r\n` +
+         `${value}\r\n`;
+}
+
+function asBlob(text) {
+  return Utilities.newBlob(text, 'text/plain;charset=utf-8');
+}
+
+
+// ============== 工具：构建邮件正文文本 ==============
+
+function buildEmailText(msg) {
+  return [
     '========================================',
     '  邮件转发 - TianYi Upload API',
     '========================================',
     '',
-    `From:    ${message.getFrom()}`,
-    `To:      ${message.getTo() || ''}`,
-    `Date:    ${message.getDate().toISOString()}`,
-    `Subject: ${message.getSubject() || '(无主题)'}`,
+    `From:    ${msg.getFrom() || ''}`,
+    `To:      ${msg.getTo()   || ''}`,
+    `Date:    ${msg.getDate().toISOString()}`,
+    `Subject: ${msg.getSubject() || '(无主题)'}`,
     '',
     '----------------------------------------',
     '  邮件正文',
     '----------------------------------------',
     '',
-    message.getPlainBody() || '(无正文内容)',
+    msg.getPlainBody() || '(无正文内容)',
     '',
     '========================================',
-  ];
-  return lines.join('\n');
+  ].join('\n');
 }
 
 
-// ========== 手动测试（在编辑器里运行） ==========
+// ============== 手动调试 ==============
+
 function testNow() {
-  console.log('🧪 手动执行 main()...');
+  Logger.log('[testNow] 手动触发 main()');
   main();
+}
+
+function testSingle(id) {
+  // 调试用：传入邮件 message id 上传指定邮件
+  const msg = GmailApp.getMessageById(id);
+  uploadMessage(msg);
 }
