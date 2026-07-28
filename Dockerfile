@@ -34,7 +34,8 @@ RUN pip install --no-cache-dir \
     pillow \
     pymupdf \
     python-docx \
-    resend
+    resend \
+    cos-python-sdk-v5
 
 # 2) 安装 LangChain 生态
 RUN pip install --no-cache-dir \
