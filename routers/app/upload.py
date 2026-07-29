@@ -2,20 +2,30 @@
 文件上传 API - 解析 + COS + 企业微信通知
 """
 import io
+import json
 import re
 import os
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
+from sqlmodel import Session
 from utils.app.services.file_parser import parse_file
 from utils.app.services.cos_uploader import upload_file as cos_upload
 from utils.app.services.wechat_bot import send_text
+from utils.app.models import UploadRecord
+from utils.core.db import get_connection_url, create_engine
 
 router = APIRouter(prefix="/api", tags=["Upload API"])
 security = HTTPBearer(auto_error=False)
 
 API_KEY = os.environ.get("API_UPLOAD_KEY", "")
+
+
+def _get_db_session():
+    """获取数据库会话"""
+    engine = create_engine(get_connection_url())
+    return Session(engine)
 
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
@@ -60,6 +70,7 @@ MAX_FILES = 20
 @router.post("/upload")
 async def upload_files(
     files: list[UploadFile] = File(...),
+    month: str = Form("5", description="月份（用于税单通知，如 5）"),
     wechat_webhook: str | None = Form(None),
     send_to_wechat: bool = Form(True),
     upload_to_cos: bool = Form(True),
@@ -68,8 +79,10 @@ async def upload_files(
     """上传并处理多个文件
 
     - 解析文件内容（PDF/DOCX/Excel/CSV/文本）
+    - 如果是 PDF 税单，自动提取 SALDO FINALE 金额
     - 可选上传到腾讯云 COS
-    - 可选发送处理报告到企业微信群
+    - 可选发送处理报告/税单通知到企业微信群
+    - 记录所有操作到数据库以便管理页面查看
     """
     import logging
     logger = logging.getLogger("uvicorn.error")
@@ -79,6 +92,7 @@ async def upload_files(
             raise HTTPException(status_code=400, detail=f"单次最多上传 {MAX_FILES} 个文件")
 
         results = []
+        db_records = []
 
         for file in files:
             filename = file.filename or "unknown"
@@ -103,27 +117,96 @@ async def upload_files(
                 "status": "ok", "content_preview": content[:500], "content_length": len(content),
             }
 
+            # 1.1 如果是 PDF，尝试提取 SALDO FINALE（工人税）
+            tax_amount = None
+            if ext == ".pdf":
+                try:
+                    tax_amount = _extract_saldo_finale(content)
+                    if tax_amount is not None:
+                        result["tax_amount"] = tax_amount
+                except Exception:
+                    pass
+
             # 2. 上传到腾讯云 COS
+            cos_url = None
+            cos_key = None
+            cos_status = None
+            cos_error = None
             if upload_to_cos:
                 file_bytes.seek(0)
                 cos_result = cos_upload(file_bytes, filename)
                 if cos_result["status"] == "ok":
-                    result["cos_url"] = cos_result["cos_url"]
-                    result["cos_key"] = cos_result["cos_key"]
+                    cos_url = cos_result.get("cos_url")
+                    cos_key = cos_result.get("cos_key")
+                    result["cos_url"] = cos_url
+                    result["cos_key"] = cos_key
                 else:
-                    result["cos_status"] = "failed"
-                    result["cos_error"] = cos_result.get("error")
+                    cos_status = "failed"
+                    cos_error = cos_result.get("error")
+                    result["cos_status"] = cos_status
+                    result["cos_error"] = cos_error
 
             results.append(result)
 
-        # 3. 发送处理报告到企业微信群
+            # 创建数据库记录
+            db_record = UploadRecord(
+                filename=filename,
+                file_ext=ext,
+                file_size=len(raw),
+                content_preview=content[:500],
+                content_length=len(content),
+                cos_url=cos_url,
+                cos_key=cos_key,
+                cos_status=cos_status,
+                cos_error=cos_error,
+                tax_amount=tax_amount,
+                tax_month=month if tax_amount else None,
+            )
+            db_records.append(db_record)
+
+        # 3. 发送通知到企业微信群
         wechat_resp = None
+        wechat_status = "skipped"
+        wechat_error = None
         if send_to_wechat:
             try:
-                from utils.app.services.wechat_bot import send_file_result_summary
-                wechat_resp = send_file_result_summary(results, webhook_url=wechat_webhook)
+                tax_results = [r for r in results if r.get("tax_amount") is not None]
+                if tax_results:
+                    tax_amount = tax_results[0]["tax_amount"]
+                    message = _build_tax_message(tax_amount, month=month)
+                    wechat_resp = send_text(message, webhook_url=wechat_webhook)
+                else:
+                    from utils.app.services.wechat_bot import send_file_result_summary
+                    wechat_resp = send_file_result_summary(results, webhook_url=wechat_webhook)
+
+                if wechat_resp and wechat_resp.get("errcode") == 0:
+                    wechat_status = "success"
+                else:
+                    wechat_status = "failed"
+                    wechat_error = wechat_resp.get("errmsg", str(wechat_resp)) if wechat_resp else "未知错误"
             except Exception as e:
+                wechat_status = "failed"
+                wechat_error = str(e)
                 wechat_resp = {"errcode": -1, "errmsg": str(e)}
+
+        # 4. 更新所有数据库记录的微信状态
+        try:
+            db_session = _get_db_session()
+            try:
+                for record in db_records:
+                    record.wechat_status = wechat_status
+                    record.wechat_error = wechat_error
+                    record.wechat_response = json.dumps(wechat_resp, ensure_ascii=False) if wechat_resp else None
+                    record.last_error = wechat_error
+                    db_session.add(record)
+                db_session.commit()
+                # 返回记录的 ID
+                for record, result in zip(db_records, [r for r in results if r["status"] == "ok"]):
+                    result["record_id"] = record.id
+            finally:
+                db_session.close()
+        except Exception as db_err:
+            logger.error(f"保存上传记录到数据库失败: {db_err}")
 
         success_count = sum(1 for r in results if r["status"] == "ok")
         skip_count = sum(1 for r in results if r["status"] == "skipped")
@@ -133,14 +216,12 @@ async def upload_files(
             "results": results, "wechat_notify": wechat_resp,
         }
 
-        # 确保返回的数据全部 JSON 可序列化（字符串化所有非基本类型）
         return _sanitize_for_json(response_data)
     except HTTPException:
-        raise  # 让 FastAPI 正常处理 HTTPException
+        raise
     except Exception as e:
         logger.error(f"Upload error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Upload error: {type(e).__name__}: {str(e)[:200]}")
-
 
 # ============================================================
 # PDF 工人税解析 - 提取 SALDO FINALE 并发送企业微信通知
@@ -233,7 +314,24 @@ async def parse_tax_pdf(
         # 2. 提取 SALDO FINALE
         amount = _extract_saldo_finale(pdf_text)
         if amount is None:
-            # 返回解析出的文本以便调试
+            # 记录到数据库
+            try:
+                db_session = _get_db_session()
+                try:
+                    record = UploadRecord(
+                        filename=file.filename or "unknown.pdf",
+                        file_ext=".pdf",
+                        file_size=len(raw),
+                        content_preview=pdf_text[:500],
+                        content_length=len(pdf_text),
+                    )
+                    db_session.add(record)
+                    db_session.commit()
+                finally:
+                    db_session.close()
+            except Exception as db_err:
+                logger.error(f"保存记录失败: {db_err}")
+
             return {
                 "status": "error",
                 "detail": "未找到 SALDO FINALE 字段",
@@ -242,18 +340,54 @@ async def parse_tax_pdf(
 
         # 3. 组装消息并发送企业微信
         message = _build_tax_message(amount, month=month)
+        wechat_status = "skipped"
+        wechat_error = None
         wechat_resp = None
         if send_to_wechat:
             try:
                 wechat_resp = send_text(message, webhook_url=wechat_webhook)
+                if wechat_resp and wechat_resp.get("errcode") == 0:
+                    wechat_status = "success"
+                else:
+                    wechat_status = "failed"
+                    wechat_error = wechat_resp.get("errmsg", str(wechat_resp)) if wechat_resp else "未知错误"
             except Exception as e:
+                wechat_status = "failed"
+                wechat_error = str(e)
                 wechat_resp = {"errcode": -1, "errmsg": str(e)}
+
+        # 4. 保存记录到数据库
+        try:
+            db_session = _get_db_session()
+            try:
+                record = UploadRecord(
+                    filename=file.filename or "unknown.pdf",
+                    file_ext=".pdf",
+                    file_size=len(raw),
+                    content_preview=pdf_text[:500],
+                    content_length=len(pdf_text),
+                    tax_amount=amount,
+                    tax_month=month,
+                    wechat_status=wechat_status,
+                    wechat_error=wechat_error,
+                    wechat_response=json.dumps(wechat_resp, ensure_ascii=False) if wechat_resp else None,
+                    last_error=wechat_error,
+                )
+                db_session.add(record)
+                db_session.commit()
+                record_id = record.id
+            finally:
+                db_session.close()
+        except Exception as db_err:
+            logger.error(f"保存税单记录失败: {db_err}")
+            record_id = None
 
         return {
             "status": "ok",
             "amount": amount,
             "message": message,
             "wechat_notify": wechat_resp,
+            "record_id": record_id,
         }
 
     except HTTPException:

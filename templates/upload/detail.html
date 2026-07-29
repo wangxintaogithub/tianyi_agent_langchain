@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}上传记录详情 - {{ record.filename }}{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div>
+            <a href="{{ url_for('list_upload_records') }}" class="text-muted text-decoration-none">&larr; 返回列表</a>
+            <h1 class="mt-2 mb-0">上传记录详情</h1>
+        </div>
+        <div class="d-flex gap-2">
+            {% if record.cos_url %}
+            <a href="{{ record.cos_url }}" target="_blank" class="btn btn-outline-primary">
+                查看文件
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- 重发结果提示 -->
+    <div id="resend-result"></div>
+
+    <div class="row g-4">
+        <!-- 基本信息 -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">基本信息</div>
+                <div class="card-body">
+                    <table class="table mb-0">
+                        <tbody>
+                            <tr>
+                                <td class="fw-semibold" style="width: 120px;">记录 ID</td>
+                                <td><code>{{ record.id }}</code></td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold">文件名</td>
+                                <td>{{ record.filename }}</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold">文件类型</td>
+                                <td><span class="badge bg-secondary">{{ record.file_ext }}</span></td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold">文件大小</td>
+                                <td>
+                                    {% if record.file_size >= 1024 * 1024 %}
+                                        {{ "%.2f"|format(record.file_size / 1024 / 1024) }} MB
+                                    {% elif record.file_size >= 1024 %}
+                                        {{ "%.2f"|format(record.file_size / 1024) }} KB
+                                    {% else %}
+                                        {{ record.file_size }} B
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold">内容长度</td>
+                                <td>{{ record.content_length }} 字符</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-semibold">上传时间</td>
+                                <td>
+                                    {% if record.created_at %}
+                                    {{ record.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% if record.tax_amount %}
+                            <tr>
+                                <td class="fw-semibold">税单金额</td>
+                                <td><span class="badge bg-warning text-dark">{{ record.tax_amount }}€</span></td>
+                            </tr>
+                            {% endif %}
+                            {% if record.tax_month %}
+                            <tr>
+                                <td class="fw-semibold">税单月份</td>
+                                <td>{{ record.tax_month }} 月</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 发送状态 -->
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">发送状态</div>
+                <div class="card-body">
+                    <h5 class="card-title">企业微信通知</h5>
+                    <table class="table mb-3">
+                        <tbody>
+                            <tr>
+                                <td class="fw-semibold" style="width: 100px;">状态</td>
+                                <td>
+                                    {% if record.wechat_status == "success" %}
+                                    <span class="badge bg-success">发送成功</span>
+                                    {% elif record.wechat_status == "failed" %}
+                                    <span class="badge bg-danger">发送失败</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">未发送</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% if record.wechat_error %}
+                            <tr>
+                                <td class="fw-semibold">错误信息</td>
+                                <td><code class="text-danger">{{ record.wechat_error }}</code></td>
+                            </tr>
+                            {% endif %}
+                            {% if wechat_response_data %}
+                            <tr>
+                                <td class="fw-semibold">原始响应</td>
+                                <td>
+                                    <pre class="mb-0" style="max-height: 120px; overflow-y: auto; font-size: 0.8rem;"><code>{{ wechat_response_data | tojson(indent=2) }}</code></pre>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+
+                    {% if record.wechat_status == "failed" or record.wechat_status == "skipped" %}
+                    <button class="btn btn-warning btn-sm"
+                            hx-post="{{ url_for('resend_wechat', record_id=record.id) }}"
+                            hx-target="#resend-result"
+                            hx-swap="innerHTML">
+                        重新发送企业微信
+                    </button>
+                    {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- COS 信息 -->
+        {% if record.cos_url or record.cos_key %}
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">腾讯云 COS</div>
+                <div class="card-body">
+                    <table class="table mb-0">
+                        <tbody>
+                            {% if record.cos_url %}
+                            <tr>
+                                <td class="fw-semibold" style="width: 100px;">文件链接</td>
+                                <td>
+                                    <a href="{{ record.cos_url }}" target="_blank" class="text-break">{{ record.cos_url }}</a>
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% if record.cos_key %}
+                            <tr>
+                                <td class="fw-semibold">存储路径</td>
+                                <td><code>{{ record.cos_key }}</code></td>
+                            </tr>
+                            {% endif %}
+                            {% if record.cos_status %}
+                            <tr>
+                                <td class="fw-semibold">上传状态</td>
+                                <td>
+                                    {% if record.cos_status == "ok" or not record.cos_status %}
+                                    <span class="badge bg-success">成功</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">{{ record.cos_status }}</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endif %}
+                            {% if record.cos_error %}
+                            <tr>
+                                <td class="fw-semibold">错误信息</td>
+                                <td><code class="text-danger">{{ record.cos_error }}</code></td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- 内容预览 -->
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">内容预览</div>
+                <div class="card-body">
+                    {% if record.content_preview %}
+                    <pre class="mb-0" style="max-height: 300px; overflow-y: auto; font-size: 0.85rem; white-space: pre-wrap; word-break: break-all;"><code>{{ record.content_preview }}</code></pre>
+                    {% if record.content_length > 500 %}
+                    <small class="text-muted mt-2 d-block">仅显示前 500 字符，共 {{ record.content_length }} 字符</small>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-muted mb-0">无内容预览</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- 重试信息 -->
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">重试信息</div>
+                <div class="card-body">
+                    <table class="table mb-0">
+                        <tbody>
+                            <tr>
+                                <td class="fw-semibold" style="width: 120px;">重试次数</td>
+                                <td>{{ record.retry_count }}</td>
+                            </tr>
+                            {% if record.last_retry_at %}
+                            <tr>
+                                <td class="fw-semibold">最后重试</td>
+                                <td>{{ record.last_retry_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            </tr>
+                            {% endif %}
+                            {% if record.last_error %}
+                            <tr>
+                                <td class="fw-semibold">最后错误</td>
+                                <td><code class="text-danger">{{ record.last_error }}</code></td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+{% endblock %}

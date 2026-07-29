@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+
+{% block title %}邮件记录管理{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <h1 class="mb-0">邮件记录管理</h1>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('list_upload_records') }}?status=all" class="btn btn-sm {% if current_status == 'all' %}btn-primary{% else %}btn-outline-primary{% endif %}">全部</a>
+            <a href="{{ url_for('list_upload_records') }}?status=success" class="btn btn-sm {% if current_status == 'success' %}btn-primary{% else %}btn-outline-primary{% endif %}">已发送</a>
+            <a href="{{ url_for('list_upload_records') }}?status=failed" class="btn btn-sm {% if current_status == 'failed' %}btn-primary{% else %}btn-outline-primary{% endif %}">失败</a>
+        </div>
+    </div>
+
+    <!-- 搜索 -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="GET" action="{{ url_for('list_upload_records') }}" class="d-flex gap-2">
+                {% if current_status and current_status != 'all' %}
+                <input type="hidden" name="status" value="{{ current_status }}">
+                {% endif %}
+                <input type="text" name="search" class="form-control" placeholder="搜索公司名称/负责人..." value="{{ search }}" style="max-width: 300px;">
+                <button type="submit" class="btn btn-primary">搜索</button>
+                {% if search %}
+                <a href="{{ url_for('list_upload_records') }}?status={{ current_status }}" class="btn btn-outline-secondary">清除</a>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    <!-- 记录表格 -->
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>公司名称</th>
+                            <th>负责人</th>
+                            <th>发送状态</th>
+                            <th>文件</th>
+                            <th>上传时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if records %}
+                        {% for record in records %}
+                        <tr>
+                            <td>
+                                <a href="{{ url_for('view_upload_record', record_id=record.id) }}" class="fw-semibold">
+                                    {{ record.company_name or '-' }}
+                                </a>
+                            </td>
+                            <td>{{ record.contact_person or record.email_recipient or '-' }}</td>
+                            <td>
+                                {% if record.email_status == "success" %}
+                                <span class="badge bg-success">成功</span>
+                                {% elif record.email_status == "failed" %}
+                                <span class="badge bg-danger">失败</span>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if record.cos_url %}
+                                <button class="btn btn-sm btn-outline-info preview-btn"
+                                        data-record-id="{{ record.id }}"
+                                        data-filename="{{ record.filename }}">
+                                    预览
+                                </button>
+                                {% else %}
+                                <span class="text-muted">-</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <small class="text-muted">
+                                    {% if record.created_at %}
+                                    {{ record.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                    {% endif %}
+                                </small>
+                            </td>
+                            <td>
+                                <div class="d-flex gap-1">
+                                    <a href="{{ url_for('view_upload_record', record_id=record.id) }}" class="btn btn-sm btn-outline-primary">详情</a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4">
+                                <p class="text-muted mb-0">
+                                    {% if search %}
+                                    未找到匹配 "{{ search }}" 的记录
+                                    {% else %}
+                                    暂无邮件记录
+                                    {% endif %}
+                                </p>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 分页 -->
+    {% if total_pages > 1 %}
+    <nav class="mt-4">
+        <ul class="list-inline text-center">
+            {% if page > 1 %}
+            <li class="list-inline-item">
+                <a href="{{ url_for('list_upload_records') }}?page={{ page - 1 }}&per_page={{ per_page }}&status={{ current_status }}&search={{ search }}" class="btn btn-sm btn-outline-primary">上一页</a>
+            </li>
+            {% endif %}
+            <li class="list-inline-item">
+                <span class="text-muted">第 {{ page }} / {{ total_pages }} 页（共 {{ total }} 条）</span>
+            </li>
+            {% if page < total_pages %}
+            <li class="list-inline-item">
+                <a href="{{ url_for('list_upload_records') }}?page={{ page + 1 }}&per_page={{ per_page }}&status={{ current_status }}&search={{ search }}" class="btn btn-sm btn-outline-primary">下一页</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+
+<!-- 文件预览弹窗 -->
+<div class="modal fade" id="previewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <ul class="nav nav-tabs mb-0" id="previewTabs" role="tablist">
+                    {% for record in records %}
+                    {% if record.cos_url %}
+                    {% set is_first = loop.first %}
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link{{ ' active' if is_first }}"
+                                id="tab-{{ record.id }}"
+                                data-bs-toggle="tab"
+                                data-bs-target="#preview-{{ record.id }}"
+                                type="button"
+                                role="tab"
+                                data-preview-url="{{ url_for('preview_uploaded_file', record_id=record.id) }}">
+                            {{ record.filename | truncate(20) }}
+                        </button>
+                    </li>
+                    {% endif %}
+                    {% endfor %}
+                </ul>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="tab-content" id="previewTabContent">
+                    {% for record in records %}
+                    {% if record.cos_url %}
+                    {% set is_first = loop.first %}
+                    <div class="tab-pane fade{{ ' show active' if is_first }}"
+                         id="preview-{{ record.id }}"
+                         role="tabpanel"
+                         style="height: 80vh;">
+                        <iframe src="{{ url_for('preview_uploaded_file', record_id=record.id) if is_first else '' }}"
+                                class="w-100 h-100"
+                                style="border: none;"
+                                title="{{ record.filename }}">
+                        </iframe>
+                    </div>
+                    {% endif %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// 文件预览弹窗 - Tab 切换时动态加载 iframe
+document.addEventListener('DOMContentLoaded', function() {
+    const previewBtns = document.querySelectorAll('.preview-btn');
+    const modal = document.getElementById('previewModal');
+
+    previewBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            const recordId = this.dataset.recordId;
+            // 激活对应的 tab
+            const tab = document.getElementById('tab-' + recordId);
+            if (tab) {
+                // 使用 Bootstrap 的 Tab API 切换
+                bootstrap.Tab.getOrCreateInstance(tab).show();
+            }
+        });
+    });
+
+    // Tab 切换时懒加载 iframe
+    document.querySelectorAll('#previewTabs .nav-link').forEach(function(tab) {
+        tab.addEventListener('shown.bs.tab', function(e) {
+            const targetId = e.target.getAttribute('data-bs-target');
+            const pane = document.querySelector(targetId);
+            const iframe = pane.querySelector('iframe');
+            const url = e.target.dataset.previewUrl;
+            if (iframe && !iframe.src && url) {
+                iframe.src = url;
+            }
+        });
+    });
+
+    // 关闭弹窗时清空未激活的 iframe（释放内存）
+    modal.addEventListener('hidden.bs.modal', function() {
+        document.querySelectorAll('#previewTabContent .tab-pane iframe').forEach(function(iframe) {
+            const activePane = modal.querySelector('.tab-pane.show.active iframe');
+            if (iframe !== activePane) {
+                iframe.src = '';
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

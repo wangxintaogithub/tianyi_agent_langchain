@@ -20,6 +20,7 @@ from routers.app import langchain as langchain_router
 from routers.app import agent as agent_router
 
 from routers.app import upload as upload_router
+from routers.app import upload_manage as upload_manage_router
 from utils.core.dependencies import (
     get_user_from_request,
     require_unauthenticated_client,
@@ -143,6 +144,7 @@ app.include_router(user.router)
 app.include_router(langchain_router.router)
 app.include_router(agent_router.router)
 app.include_router(upload_router.router)
+app.include_router(upload_manage_router.router)
 
 
 # --- Exception Handling Middlewares ---
